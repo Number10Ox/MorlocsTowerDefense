@@ -71,18 +71,18 @@ These constraints come directly from the spec and must be respected during imple
 | Package | Purpose | Notes |
 |---------|---------|-------|
 | **Input System** (new) | Player input (mouse clicks, keyboard) | Use `UnityEngine.InputSystem`. Do not use legacy `Input` class. |
-| **UI Toolkit** | All runtime UI (HUD, popups, overlays) | UXML for layout, USS for styles, C# for binding. No UGUI Canvas. |
-| **Cinemachine** | Camera control | Use for any camera management if needed. |
+| **UI Toolkit** | New runtime UI (HUD, overlays) | UXML for layout, USS for styles, C# for binding. Only for UI not already provided as prefabs. |
+| **UGUI** | Provided popup prefabs | WinPopup and LosePopup are provided as UGUI prefabs. Use as-is; do not rebuild in UI Toolkit. |
 | **ScriptableObjects** | Tuning data | Creep definitions, turret definitions, wave definitions, economy config. |
-| **TextMeshPro** | _Not used_ | UI text handled via UI Toolkit labels. |
-| **Addressables** | _TBD_ | Evaluate need. Assets in Resources only as exception. |
+| **TextMeshPro** | _Not used_ | Provided UGUI popups use legacy Text. New UI uses UI Toolkit labels. |
+| **Cinemachine** | _Not used_ | No camera control needed for this project. |
+| **Addressables** | _Not used_ | MVP scope does not justify the complexity. Direct prefab references via serialized fields are sufficient. |
 
 ### Asset Loading Strategy
 
-- Avoid `Resources/` folder where possible
-- Prefer Addressables or AssetBundle references for loading prefabs at runtime
 - ScriptableObject assets are referenced directly via serialized fields on MonoBehaviours
-- If Addressables adds unnecessary complexity for this MVP scope, direct prefab references via serialized fields are acceptable
+- Prefabs referenced directly via serialized fields (no Addressables or AssetBundles needed for MVP scope)
+- Avoid `Resources/` folder where possible; direct references are preferred
 
 ---
 
