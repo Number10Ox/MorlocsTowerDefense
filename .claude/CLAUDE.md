@@ -67,6 +67,7 @@ At the start of each session, check for and read the following files if they exi
 ### Performance Rules
 
 - **No LINQ in runtime code** - Do not use `System.Linq` in any runtime (non-editor-tool) code. LINQ causes hidden allocations and GC pressure. Use explicit loops, arrays, and manual collection operations instead.
+- **Minimize GC allocations** - Avoid boxing value types. Use object pooling for frequently created/destroyed objects (creeps, projectiles). Design systems for clean teardown and rebuild without residual allocations. Prefer structs, pre-allocated arrays/lists, and cached references over repeated allocations. Lambdas with variable capture are acceptable when necessary.
 
 ---
 
