@@ -128,7 +128,21 @@ The MainScene already contains: Terrain, Base (centered), and SpawnPoints placed
 
 Implementation order is designed to build systems incrementally, with each story producing a testable result.
 
-### Story 1: Creep Spawning & Movement
+### Story 1: Project Foundation
+
+> As a developer, the project has a working architectural skeleton so gameplay systems can be built on a solid base.
+
+**Acceptance Criteria:**
+- Game bootstrap / entry point exists and runs on Play
+- Game state machine is implemented with at least `Init` and `Playing` states
+- Base has a component that systems can discover
+- Folder structure and namespace (`MorlocsTD`) are established
+- Test infrastructure is set up (Edit Mode and Play Mode test assemblies exist and run)
+- A test verifies the game state machine transitions from `Init` to `Playing`
+
+---
+
+### Story 2: Creep Spawning & Movement
 
 > As a player, I see creeps spawn from the edges of the battlefield and move toward my base.
 
@@ -140,7 +154,7 @@ Implementation order is designed to build systems incrementally, with each story
 
 ---
 
-### Story 2: Base Health & Lose Condition
+### Story 3: Base Health & Lose Condition
 
 > As a player, when too many creeps reach my base, I am informed I have lost.
 
@@ -152,7 +166,7 @@ Implementation order is designed to build systems incrementally, with each story
 
 ---
 
-### Story 3: Turret Placement
+### Story 4: Turret Placement
 
 > As a player, I can place turrets on the battlefield using my mouse.
 
@@ -164,7 +178,7 @@ Implementation order is designed to build systems incrementally, with each story
 
 ---
 
-### Story 4: Turret Shooting & Creep Damage
+### Story 5: Turret Shooting & Creep Damage
 
 > As a player, turrets I've placed automatically shoot at nearby creeps and destroy them.
 
@@ -177,7 +191,7 @@ Implementation order is designed to build systems incrementally, with each story
 
 ---
 
-### Story 5: Economy System
+### Story 6: Economy System
 
 > As a player, I spend coins to place turrets and earn coins from killing creeps.
 
@@ -190,7 +204,7 @@ Implementation order is designed to build systems incrementally, with each story
 
 ---
 
-### Story 6: Turret Types (Regular & Freezing)
+### Story 7: Turret Types (Regular & Freezing)
 
 > As a player, I can choose between a regular turret and a freezing turret, each with different effects.
 
@@ -204,7 +218,7 @@ Implementation order is designed to build systems incrementally, with each story
 
 ---
 
-### Story 7: Creep Variety
+### Story 8: Creep Variety
 
 > As a player, I face different types of creeps with varying difficulty.
 
@@ -217,7 +231,7 @@ Implementation order is designed to build systems incrementally, with each story
 
 ---
 
-### Story 8: Wave System
+### Story 9: Wave System
 
 > As a player, I face successive waves of creeps, and I win if I survive them all.
 
@@ -231,7 +245,7 @@ Implementation order is designed to build systems incrementally, with each story
 
 ---
 
-### Story 9: Game Reset
+### Story 10: Game Reset
 
 > As a player, I can restart the game after winning or losing without leaving Play Mode.
 
