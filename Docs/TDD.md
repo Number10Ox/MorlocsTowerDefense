@@ -76,13 +76,13 @@ These constraints come directly from the spec and must be respected during imple
 | **ScriptableObjects** | Tuning data | Creep definitions, turret definitions, wave definitions, economy config. |
 | **TextMeshPro** | _Not used_ | Provided UGUI popups use legacy Text. New UI uses UI Toolkit labels. |
 | **Cinemachine** | _Not used_ | No camera control needed for this project. |
-| **Addressables** | _Not used_ | MVP scope does not justify the complexity. Direct prefab references via serialized fields are sufficient. |
+| **Addressables** | ScriptableObject data loading | Load tuning data (creep defs, turret defs, wave defs, economy config) via Addressables for extensibility. Visual prefabs use direct serialized field references. |
 
 ### Asset Loading Strategy
 
-- ScriptableObject assets are referenced directly via serialized fields on MonoBehaviours
-- Prefabs referenced directly via serialized fields (no Addressables or AssetBundles needed for MVP scope)
-- Avoid `Resources/` folder where possible; direct references are preferred
+- ScriptableObject tuning data loaded via Addressables -- enables adding new definitions without code changes
+- Visual prefabs (creeps, turrets, base, popups) referenced directly via serialized fields
+- Avoid `Resources/` folder; use Addressables or direct references
 
 ---
 

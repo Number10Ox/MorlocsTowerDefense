@@ -62,6 +62,29 @@
 
 ---
 
+## Unity Architectural Preferences
+
+### Architectural Principles
+
+- **Data-oriented design** - Separate data from behavior. Game state lives in plain data structures (structs, ScriptableObjects); systems operate on that data. Prefer structs for hot-path data. Minimize scattered state across MonoBehaviours.
+- **System-and-component thinking** - MonoBehaviours act as thin components that hold references and wire into Unity lifecycle. Logic lives in systems/managers that process components, not in the components themselves.
+- **MonoBehaviour minimalism** - Only inherit from MonoBehaviour when Unity requires it (scene presence, coroutines, serialized inspector references, collision callbacks). Pure logic, data models, state machines, and utility classes should be plain C# classes or structs. Avoid an architecture dominated by per-object `Update()` calls; prefer centralized system ticks that iterate over data.
+- **Simulation/presentation separation** - The game simulation (state, logic, rules) is independent of visuals. Simulation ticks on data and produces state changes; the presentation layer reads state and updates transforms, effects, and UI. No gameplay logic should depend on visual state.
+- **MVU-style UI architecture** - UI follows a Model-View-Update pattern: a model (state) drives what the view displays; user actions produce messages/events that update the model; the view re-renders from the model. No direct UI-to-game-state mutation.
+- **State machine state management** - Game flow managed by explicit state machines. Lightweight custom implementation -- no Stateless library (avoids LINQ and allocation concerns). States are data, transitions are explicit.
+
+### Preferred Tech Choices
+
+| Technology | Purpose | Notes |
+|-----------|---------|-------|
+| **Input System** (new) | Player input | Use `UnityEngine.InputSystem`. Do not use legacy `Input` class. |
+| **UI Toolkit** | Runtime UI | UXML for layout, USS for styles, C# for binding. Preferred over UGUI for new UI. |
+| **Cinemachine** | Camera control | Use for camera management when the project requires camera work. |
+| **ScriptableObjects** | Tuning data | Definitions, configurations, and tunable parameters. |
+| **Addressables** | Asset loading | Use for extensible sets of assets including ScriptableObject collections. Enables runtime-loadable, data-driven content without hardcoded references. |
+
+---
+
 ## Testing Strategy
 
 Tests are required for every deliverable. Tests must be written alongside feature implementation, not deferred.
