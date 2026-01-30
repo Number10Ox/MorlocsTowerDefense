@@ -1,5 +1,13 @@
 # Claude Code Rules
 
+## Session Start
+
+At the start of each session, check for and read the following files if they exist:
+- `Docs/STATUS.md` -- project progress, key decisions, and open questions
+- `Docs/TDD.md` -- technical design document with architecture, constraints, and user stories
+
+---
+
 ## Unity C# Coding Style
 
 ### Naming Conventions
