@@ -67,7 +67,16 @@ At the start of each session, check for and read the following files if they exi
 ### Performance Rules
 
 - **No LINQ in runtime code** - Do not use `System.Linq` in any runtime (non-editor-tool) code. LINQ causes hidden allocations and GC pressure. Use explicit loops, arrays, and manual collection operations instead.
-- **Minimize GC allocations** - Avoid boxing value types. Use object pooling for frequently created/destroyed objects (creeps, projectiles). Design systems for clean teardown and rebuild without residual allocations. Prefer structs, pre-allocated arrays/lists, and cached references over repeated allocations. Lambdas with variable capture are acceptable when necessary.
+- **Minimize GC allocations** - Every `GC.Alloc` in a hot path is a bug. Specific rules:
+  - **Boxing** - Never pass value types to `object` parameters. Avoid non-generic collections (`ArrayList`, `Hashtable`). Use generic collections and interfaces.
+  - **Object pooling** - Pool frequently created/destroyed objects (creeps, projectiles). Design systems for clean teardown and rebuild without residual allocations.
+  - **Pre-allocate collections** - Size lists/arrays upfront. Reuse with `Clear()` instead of `new`. No `new List<T>()` in per-frame code.
+  - **Cache references** - Cache results of `GetComponent<T>()`, `FindObjectOfType<T>()`, and similar lookups. Never call them in Update or hot loops.
+  - **Strings** - Avoid string concatenation (`+`) in hot paths; it allocates. Use `StringBuilder` or pre-built strings. Be cautious with `Debug.Log` string interpolation in loops.
+  - **Coroutine yields** - Cache `WaitForSeconds` and other yield instruction instances in fields. `yield return new WaitForSeconds()` allocates every call.
+  - **foreach** - Safe on arrays and `List<T>`. Avoid `foreach` on non-generic or custom `IEnumerable` implementations that allocate enumerators.
+  - **Lambdas/closures** - Acceptable for setup, configuration, and infrequent callbacks. Avoid creating new lambdas with captures in per-frame or high-frequency code paths. Cache delegates in fields when a callback with captures is needed on a hot path.
+  - **Structs over classes** - Prefer structs for hot-path data to avoid heap allocation. Be mindful of struct size and copying costs.
 
 ---
 
