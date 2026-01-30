@@ -1,0 +1,66 @@
+# Logs
+Logs/
+*.log
+
+# Temp
+Temp/
+*.tmp
+
+# Library
+Library/
+
+# Build
+Build/
+Builds/
+*.apk
+*.aab
+*.exe
+
+# User settings
+UserSettings/
+*.sublime-project
+*.sublime-workspace
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.csproj
+*.sln
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Rider
+.Rider/
+.idea/
+*.sln.iml
+
+# MonoDevelop
+*.pidb
+*.userprefs
+mono_crash.*
+
+# Unity generated
+ProjectSettings/BurstAotSettings_*
+ProjectSettings/GvlGraphicsSettings.asset
+ProjectSettings/WebGL*
+
+# Packages
+Packages/
+packages-lock.json
+
+# Local environment
+*.env
+.env.local
