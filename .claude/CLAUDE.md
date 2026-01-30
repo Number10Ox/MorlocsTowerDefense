@@ -56,6 +56,10 @@
 - Use `?.Invoke()` for safe invocation
 - Avoid UnityEvents in code-driven systems (reserve for designer-facing inspector hookups)
 
+### Performance Rules
+
+- **No LINQ in runtime code** - Do not use `System.Linq` in any runtime (non-editor-tool) code. LINQ causes hidden allocations and GC pressure. Use explicit loops, arrays, and manual collection operations instead.
+
 ---
 
 ## Testing Strategy

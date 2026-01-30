@@ -19,10 +19,22 @@ A tower defense game where creeps spawn from fixed points on the battlefield and
 
 ## 2. Architecture
 
+### Guiding Principles
+
+These are architectural directions that will inform the detailed design. Not full ECS (Unity DOTS is out of scope for this project and Unity version), but borrowing key ideas:
+
+- **Data-oriented design** - Separate data from behavior. Game state lives in plain data structures (structs, ScriptableObjects); systems operate on that data. Prefer structs for hot-path data. Minimize scattered state across MonoBehaviours.
+- **System-and-component thinking** - MonoBehaviours act as thin components that hold references and wire into Unity lifecycle. Logic lives in systems/managers that process components, not in the components themselves.
+- **MonoBehaviour minimalism** - Only inherit from MonoBehaviour when Unity requires it (scene presence, coroutines, serialized inspector references, collision callbacks). Pure logic, data models, state machines, and utility classes should be plain C# classes or structs. Avoid an architecture dominated by per-object `Update()` calls; prefer centralized system ticks that iterate over data.
+- **MVU-style UI architecture** - UI follows a Model-View-Update pattern: a model (state) drives what the view displays; user actions produce messages/events that update the model; the view re-renders from the model. No direct UI-to-game-state mutation.
+- **State machine state management** - Game flow (start, playing, wave transitions, win/lose, reset) managed by an explicit state machine. Lightweight custom implementation -- no Stateless library (avoids LINQ and allocation concerns). States are data, transitions are explicit.
+
+### Detailed Design
+
 _To be filled out through discussion and manual editing._
 
 <!--
-Suggested topics to cover:
+Topics to cover:
 - High-level system diagram / dependency graph
 - Manager vs. component responsibilities
 - Event/messaging approach (C# events, UnityEvents, ScriptableObject events, etc.)
@@ -31,6 +43,8 @@ Suggested topics to cover:
 - How wave definitions are structured and sequenced
 - Game state machine (Menu -> Playing -> Win/Lose -> Reset)
 - Folder / namespace organization
+- Where the "model" lives relative to MonoBehaviour state
+- How MVU boundaries work: what is the model, what generates update messages, what re-renders
 -->
 
 ---
