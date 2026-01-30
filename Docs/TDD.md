@@ -46,11 +46,32 @@ These constraints come directly from the spec and must be respected during imple
 - **No visual polish** - Code quality and architecture are evaluated, not visual fidelity. Don't invest in aesthetics.
 - **Scalability focus** - Architecture must make it easy to add new unit or turret types without major refactors.
 - **Use provided assets** - Use the prefabs and materials already in the project. Do not create replacement assets.
+- **No Unity asset creation from code tools** - Claude Code must not create Unity assets (scenes, prefabs, ScriptableObjects, materials, etc.). These are created in the Unity Editor by the developer. Claude Code writes C# scripts, edits existing scripts, and creates non-asset files only. When a ScriptableObject class is written in code, the developer will create the corresponding `.asset` file in the Editor.
 - **Unity version** - 2022.3.58f1.
 
 ---
 
-## 4. Data Configuration Strategy
+## 4. Tech Package Choices
+
+| Package | Purpose | Notes |
+|---------|---------|-------|
+| **Input System** (new) | Player input (mouse clicks, keyboard) | Use `UnityEngine.InputSystem`. Do not use legacy `Input` class. |
+| **UI Toolkit** | All runtime UI (HUD, popups, overlays) | UXML for layout, USS for styles, C# for binding. No UGUI Canvas. |
+| **Cinemachine** | Camera control | Use for any camera management if needed. |
+| **ScriptableObjects** | Tuning data | Creep definitions, turret definitions, wave definitions, economy config. |
+| **TextMeshPro** | _Not used_ | UI text handled via UI Toolkit labels. |
+| **Addressables** | _TBD_ | Evaluate need. Assets in Resources only as exception. |
+
+### Asset Loading Strategy
+
+- Avoid `Resources/` folder where possible
+- Prefer Addressables or AssetBundle references for loading prefabs at runtime
+- ScriptableObject assets are referenced directly via serialized fields on MonoBehaviours
+- If Addressables adds unnecessary complexity for this MVP scope, direct prefab references via serialized fields are acceptable
+
+---
+
+## 5. Data Configuration Strategy
 
 The spec emphasizes making gameplay values "easy to tweak and tune." This section defines how tunable data is exposed.
 
@@ -67,7 +88,7 @@ Considerations:
 
 ---
 
-## 5. Provided Assets Reference
+## 6. Provided Assets Reference
 
 Assets already present in the Unity project:
 
@@ -89,7 +110,7 @@ The MainScene already contains: Terrain, Base (centered), and SpawnPoints placed
 
 ---
 
-## 6. Deliverables - User Stories
+## 7. Deliverables - User Stories
 
 Implementation order is designed to build systems incrementally, with each story producing a testable result.
 
