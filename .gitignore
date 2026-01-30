@@ -64,3 +64,9 @@ packages-lock.json
 # Local environment
 *.env
 .env.local
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Test spec PDF (provided, not part of deliverable)
+Docs/Scopely BCN - Client Engineer Technical Test*.pdf
