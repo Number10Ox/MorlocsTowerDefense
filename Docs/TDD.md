@@ -54,7 +54,7 @@ GameBootstrap.Update() → GameStateMachine.Tick() → IGameState.Tick() → [Sy
 | `InitState` | Plain C# : `IGameState` | Validates scene setup (Base, SpawnPoints). Fires `SceneValidated`. Future: async Addressable loading. |
 | `PlayingState` | Plain C# : `IGameState` | Ticks `IGameSystem[]` in registered order. Fires `BaseDestroyed` / `AllWavesCleared` when conditions met. |
 | `IGameSystem` | Interface | Contract for gameplay systems: `Tick(float)`. |
-| `BaseComponent` | MonoBehaviour | Thin component on Base GameObject. Identifies the base for system discovery. Future stories add health data. |
+| `HomeBaseComponent` | MonoBehaviour | Thin component on Base GameObject. Identifies the base for system discovery. Future stories add health data. |
 
 #### Game State Machine
 
@@ -80,7 +80,7 @@ Reset: Transitioning back to `Init` triggers `PlayingState.Exit()` (tear down sp
 
 #### Component & System Pattern
 
-- **Scene components** (MonoBehaviours): Thin scene presence. Hold serialized references, identify GameObjects for system discovery, no game logic. Examples: `BaseComponent`, `CreepComponent`, `TurretComponent`, `SpawnPointComponent`. Throughout this document, "component" always refers to these MonoBehaviour scene markers — not simulation data.
+- **Scene components** (MonoBehaviours): Thin scene presence. Hold serialized references, identify GameObjects for system discovery, no game logic. Examples: `HomeBaseComponent`, `CreepComponent`, `TurretComponent`, `SpawnPointComponent`. Throughout this document, "component" always refers to these MonoBehaviour scene markers — not simulation data.
 - **Simulation data** (plain C# classes, structs, or arrays): The authoritative game state that systems read and write. Positions, health, targets, economy balance, status effects. No Unity types (`Transform`, `GameObject`) in sim data. At this project's entity counts (tens of creeps, tens of turrets), classes are the pragmatic default — they avoid the copy-modify-write-back friction of mutable structs stored in collections. Reserve structs for small, immutable value types (e.g., `GridPosition`) or cases where cache locality measurably matters.
 - **Systems** (plain C# classes implementing `IGameSystem`): Own all game logic and the simulation data for their domain. Created by `GameBootstrap`, registered with `PlayingState` as an ordered array, ticked in deterministic order. Examples: `SpawnSystem`, `MovementSystem`, `TargetingSystem`, `DamageSystem`, `EconomySystem`, `WaveSystem`.
 
@@ -164,7 +164,7 @@ Creeps and projectiles use pre-allocated object pools managed by their respectiv
 ```
 Assets/Scripts/
 ├── Core/               # GameBootstrap, GameStateMachine, GameState, GameTrigger, IGameState, IGameSystem, states
-├── Base/               # BaseComponent
+├── HomeBase/           # HomeBaseComponent
 ├── Creeps/             # (Story 2+) SpawnPointComponent, SpawnSystem, MovementSystem
 ├── Turrets/            # (Story 4+) TurretComponent, PlacementSystem, TargetingSystem
 ├── Combat/             # (Story 5+) ProjectileSystem, DamageSystem

@@ -33,7 +33,7 @@ At the start of each session, check for and read the following files if they exi
 
 ### Code Organization
 
-- **Namespaces**: Only use namespaces for libraries and reusable modules. Application code does not get a project-wide namespace. If code is meant to be consumed by other assemblies or projects, give it a namespace; otherwise omit it.
+- **Namespaces**: No project-wide namespace on application code. Generic reusable classes that are not specific to the project (e.g., state machine infrastructure, object pooling) get a namespace appropriate to their purpose. Project-specific code (gameplay systems, components, data) does not. A namespace collision with Unity or a library is a design smell — it means you are recreating something that already exists or building something generic enough to belong in a library.
 - **Folder structure**: Feature-based organization under `Assets/Scripts/`
 - **Using statements**: System first, then UnityEngine, then project namespaces
 - **Member order in classes**: Fields, then lifecycle methods (`Awake`/`Start`/`Update`/`OnDestroy`), then public methods, then private methods
@@ -90,6 +90,7 @@ At the start of each session, check for and read the following files if they exi
 - **Simulation/presentation separation** - The game simulation (state, logic, rules) is independent of visuals. Simulation ticks on data and produces state changes; the presentation layer reads state and updates transforms, effects, and UI. No gameplay logic should depend on visual state.
 - **MVU-style UI architecture** - UI follows a Model-View-Update pattern: a model (state) drives what the view displays; user actions produce messages/events that update the model; the view re-renders from the model. No direct UI-to-game-state mutation.
 - **State machine state management** - Game flow managed by explicit state machines. Lightweight custom implementation -- no Stateless library (avoids LINQ and allocation concerns). States are data, transitions are explicit.
+- **Interfaces over concrete inheritance** - Do not inherit from concrete base classes. Use interfaces for contracts and composition for code sharing. Abstract base classes are acceptable when they provide genuine shared behavior behind an interface. Concrete class inheritance leads to fragile hierarchies and hidden coupling.
 
 ### Preferred Tech Choices
 

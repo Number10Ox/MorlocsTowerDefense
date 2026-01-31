@@ -11,7 +11,7 @@ classDiagram
     class GameBootstrap {
         <<MonoBehaviour>>
         -GameStateMachine stateMachine
-        -BaseComponent baseComponent
+        -HomeBaseComponent homeBaseComponent
         +Awake()
         +Start()
         +Update()
@@ -75,7 +75,7 @@ classDiagram
         +Tick(float deltaTime)
     }
 
-    class BaseComponent {
+    class HomeBaseComponent {
         <<MonoBehaviour>>
     }
 
@@ -86,7 +86,7 @@ classDiagram
 
     GameBootstrap --> GameStateMachine : owns
     GameBootstrap --> PresentationAdapter : owns
-    GameBootstrap --> BaseComponent : serialized ref
+    GameBootstrap --> HomeBaseComponent : serialized ref
     GameStateMachine --> "0..*" IGameState : manages
     GameStateMachine --> GameState : indexes by
     GameStateMachine --> GameTrigger : transitions by
@@ -98,7 +98,7 @@ classDiagram
 **Notes:**
 - `GameBootstrap` is the only "god-level" MonoBehaviour. It is the composition root — creates the state machine, creates states, configures the transition table, and wires references.
 - `GameStateMachine` and all `IGameState` implementations are **plain C# classes**, not MonoBehaviours.
-- `BaseComponent` is a thin MonoBehaviour on the Base GameObject in the scene. It holds no logic — just identifies the object for system discovery.
+- `HomeBaseComponent` is a thin MonoBehaviour on the Base GameObject in the scene. It holds no logic — just identifies the object for system discovery.
 - States receive an `Action<GameTrigger>` delegate at construction. They fire semantic triggers (`SceneValidated`, `BaseDestroyed`, etc.) without knowing which state the trigger leads to. The transition table in `GameBootstrap` maps `(state, trigger) → destination`.
 - `IGameSystem` provides a uniform `Tick()` contract for gameplay systems. `PlayingState` receives an ordered array at construction and ticks them sequentially.
 - `PresentationAdapter` is a **plain C# class** owned by `GameBootstrap`. It is the only place that calls Unity input and rendering APIs. Systems never reference it directly — they read input structs it produces and write sim data it consumes. Stub in Story 1; gains responsibilities as systems are added.
@@ -148,7 +148,7 @@ sequenceDiagram
     participant SM as GameStateMachine
     participant Init as InitState
     participant Playing as PlayingState
-    participant Base as BaseComponent
+    participant Base as HomeBaseComponent
 
     Note over Unity: Play pressed → MainScene loads
 
@@ -301,8 +301,8 @@ Assets/
 │   │   ├── IGameSystem.cs      # interface
 │   │   ├── InitState.cs
 │   │   └── PlayingState.cs
-│   ├── Base/                   # Base identification component
-│   │   └── BaseComponent.cs
+│   ├── HomeBase/               # Home base identification component
+│   │   └── HomeBaseComponent.cs
 │   ├── Creeps/                 # (Story 2+)
 │   ├── Turrets/                # (Story 4+)
 │   ├── Combat/                 # (Story 5+)
