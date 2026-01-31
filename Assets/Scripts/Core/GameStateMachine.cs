@@ -27,9 +27,10 @@ public class GameStateMachine
 
         public override int GetHashCode()
         {
+            const int HASH_PRIME = 397;
             unchecked
             {
-                return ((int)State * 397) ^ (int)Trigger;
+                return ((int)State * HASH_PRIME) ^ (int)Trigger;
             }
         }
     }
@@ -47,7 +48,11 @@ public class GameStateMachine
 
     public void AddState(GameState id, IGameState state)
     {
-        states.Add(id, state);
+        if (states.ContainsKey(id))
+        {
+            Debug.LogWarning($"Duplicate state {id} registered. Overwriting.");
+        }
+        states[id] = state;
     }
 
     public void AddTransition(GameState from, GameTrigger trigger, GameState to)
@@ -68,7 +73,7 @@ public class GameStateMachine
             return;
         }
 
-        if (!states.ContainsKey(initialState))
+        if (!states.TryGetValue(initialState, out var initialStateInstance))
         {
             Debug.LogError($"GameStateMachine.Start(): No state registered for {initialState}.");
             return;
@@ -76,10 +81,14 @@ public class GameStateMachine
 
         started = true;
         currentStateId = initialState;
-        currentState = states[initialState];
+        currentState = initialStateInstance;
         currentState.Enter();
     }
 
+    // Queues a trigger for resolution on the next Tick. Only one pending trigger
+    // is held at a time; if Fire is called again before Tick resolves, the previous
+    // trigger is overwritten. Triggers fired during a state's Tick are deferred to
+    // the following frame.
     public void Fire(GameTrigger trigger)
     {
         if (!started)
@@ -121,7 +130,7 @@ public class GameStateMachine
             return;
         }
 
-        if (!states.ContainsKey(destination))
+        if (!states.TryGetValue(destination, out var destinationState))
         {
             Debug.LogError($"GameStateMachine: Transition ({currentStateId}, {trigger}) leads to {destination}, but no state is registered for it.");
             return;
@@ -131,7 +140,7 @@ public class GameStateMachine
         currentState.Exit();
 
         currentStateId = destination;
-        currentState = states[destination];
+        currentState = destinationState;
         currentState.Enter();
 
         OnStateChanged?.Invoke(previousStateId, destination);

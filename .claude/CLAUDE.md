@@ -43,6 +43,17 @@ At the start of each session, check for and read the following files if they exi
 - Prefer `[SerializeField] private` over `public` fields for editor-exposed data
 - Use expression-bodied properties for read-only access: `public Transform Root => root;`
 - Use `private` by default; only expose what is needed
+- **Properties over public fields** — Expose data through properties, not raw public fields. Exception: pure data containers (structs or classes that exist solely to hold data with no behavior) may use public fields.
+
+### Component Reference Patterns
+
+- **Avoid `GetComponent` in hot paths** — `GetComponent<T>()` is a runtime lookup. Never call it per-frame, in Update loops, or inside high-frequency iteration (pool Get/Return, per-creep ticks). Treat any `GetComponent` call in a loop as a performance bug.
+- **Prefer direct serialized references** — Drag-and-drop in the Inspector is the cheapest and most explicit way to wire dependencies: `[SerializeField] private CreepComponent creepComponent;`
+- **Cache once in Awake** — When a serialized reference isn't practical, call `GetComponent` once during `Awake`/`OnEnable` and store the result in a field. Never re-fetch what you already have.
+- **Use `TryGetComponent` for fallible lookups** — When the component may legitimately be absent, use `TryGetComponent` (avoids exceptions and is clearer intent than null-checking `GetComponent`).
+- **Enforce prefab contracts with `[RequireComponent]`** — If a MonoBehaviour always needs a sibling component, declare `[RequireComponent(typeof(T))]` on the class. This makes the dependency editor-enforced rather than runtime-enforced.
+- **Cache in pooling infrastructure** — Object pools that call `TryGetComponent` on Get/Return should cache the component reference per instance (e.g., in a `Dictionary<GameObject, IPoolable>`) to avoid repeated lookups across the object's pooled lifetime.
+- **Constructor injection for pure C# objects** — Systems, adapters, and other non-MonoBehaviour classes receive their dependencies through constructors, not through runtime lookups.
 
 ### Code Clarity
 
@@ -51,6 +62,7 @@ At the start of each session, check for and read the following files if they exi
 - No XML doc comments (`///`) unless defining a public API consumed by other assemblies
 - Use string interpolation: `Debug.LogError($"Failed to load: {assetName}");`
 - Use `new()` target-typed syntax: `private Dictionary<string, int> lookup = new();`
+- **No magic numbers** — Define named constants for numeric literals that carry domain meaning. Trivially obvious values (0, 1, -1, dividing/multiplying by 2) and serialized field defaults in ScriptableObjects are exempt.
 
 ### Error Handling
 

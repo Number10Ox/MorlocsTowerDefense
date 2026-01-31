@@ -9,15 +9,21 @@ public class InitStateTests
     [Test]
     public void Enter_WithValidHomeBase_FiresSceneValidated()
     {
-        GameTrigger? firedTrigger = null;
-        Action<GameTrigger> mockFire = (trigger) => firedTrigger = trigger;
         var homeBase = new GameObject("Base").AddComponent<HomeBaseComponent>();
-        var initState = new InitState(mockFire, homeBase);
+        try
+        {
+            GameTrigger? firedTrigger = null;
+            Action<GameTrigger> mockFire = (trigger) => firedTrigger = trigger;
+            var initState = new InitState(mockFire, homeBase);
 
-        initState.Enter();
+            initState.Enter();
 
-        Assert.AreEqual(GameTrigger.SceneValidated, firedTrigger);
-        UnityEngine.Object.DestroyImmediate(homeBase.gameObject);
+            Assert.AreEqual(GameTrigger.SceneValidated, firedTrigger);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(homeBase.gameObject);
+        }
     }
 
     [Test]

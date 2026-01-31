@@ -36,17 +36,18 @@ See [Architecture Diagrams](Architecture-Diagrams.md) for class diagrams, state 
 
 #### Bootstrap & Game Loop
 
-A single `GameBootstrap` MonoBehaviour in MainScene serves as the entry point and composition root. It creates the `GameStateMachine`, all `IGameState` implementations, the `SystemScheduler`, and all gameplay systems. `Update()` ticks the state machine for flow control, then ticks the system scheduler when in gameplay states.
+A single `GameBootstrap` MonoBehaviour in MainScene serves as the entry point and composition root. It creates the `GameSession` (which owns all stores), the `GameStateMachine`, all `IGameState` implementations, the `SystemScheduler`, and all gameplay systems. `Update()` ticks the state machine for flow control, calls `GameSession.BeginFrame()` to flush deferred store operations, then ticks the system scheduler when in gameplay states.
 
 ```
-GameBootstrap.Update() → GameStateMachine.Tick() → SystemScheduler.Tick() (gated by state)
+GameBootstrap.Update() → GameStateMachine.Tick() → GameSession.BeginFrame() → SystemScheduler.Tick() (gated by state) → PresentationAdapter.SyncVisuals()
 ```
 
 #### Class Responsibilities
 
 | Class | Type | Responsibility |
 |-------|------|---------------|
-| `GameBootstrap` | MonoBehaviour | Composition root. Creates state machine, states, system scheduler, and systems. Configures transition table. Drives game loop via `Update()`. Gates system ticking by current state. |
+| `GameBootstrap` | MonoBehaviour | Composition root. Creates GameSession, state machine, states, system scheduler, systems, and presentation adapter. Configures transition table. Drives game loop via `Update()`. Gates system ticking by current state. Calls `GameSession.BeginFrame()` before system tick. |
+| `GameSession` | Plain C# | Per-run session. Owns all stores (CreepStore, future: TurretStore, etc.). `BeginFrame()` flushes deferred store operations and clears per-frame change lists. `Reset()` resets all stores for game restart. Discarded and recreated on restart. |
 | `GameStateMachine` | Plain C# | Owns state registry and transition table. Resolves triggers to transitions. Fires `OnStateChanged` event. Processes pending triggers at tick start. |
 | `GameState` | Enum | State identifiers: `Init`, `Playing`, `Win`, `Lose`. |
 | `GameTrigger` | Enum | Semantic transition triggers: `SceneValidated`, `BaseDestroyed`, `AllWavesCleared`, `RestartRequested`. |
@@ -55,7 +56,13 @@ GameBootstrap.Update() → GameStateMachine.Tick() → SystemScheduler.Tick() (g
 | `PlayingState` | Plain C# : `IGameState` | Manages gameplay flow. Fires `BaseDestroyed` / `AllWavesCleared` when conditions met. Does not own or tick systems. |
 | `SystemScheduler` | Plain C# | Owns the ordered `IGameSystem[]` array. Ticks systems sequentially. Owned by `GameBootstrap`, ticked when state machine is in gameplay states. |
 | `IGameSystem` | Interface | Contract for gameplay systems: `Tick(float)`. |
+| `CreepStore` | Plain C# | Authoritative owner of the creep collection. `Add()`, `MarkForRemoval()`, `BeginFrame()` (flush removals, clear frame lists). Exposes `ActiveCreeps`, `SpawnedThisFrame`, `RemovedIdsThisFrame`. |
+| `SpawnSystem` | Plain C# : `IGameSystem` | Spawn timer. Creates `CreepSimData` entries via `CreepStore.Add()`. Depends on `CreepStore`, not on other systems. |
+| `MovementSystem` | Plain C# : `IGameSystem` | Advances creep positions toward base. Detects arrival and calls `CreepStore.MarkForRemoval()`. Depends on `CreepStore`, not on other systems. |
 | `HomeBaseComponent` | MonoBehaviour | Thin component on Base GameObject. Identifies the base for system discovery. Future stories add health data. |
+| `SpawnPointComponent` | MonoBehaviour | Thin component on SpawnPoint GameObjects. Identifies spawn positions for bootstrap discovery. |
+| `CreepComponent` | MonoBehaviour + `IPoolable` | Thin component on creep prefab instances. Holds `CreepId` for sim-to-GO mapping. Pool lifecycle: activate on get, deactivate on return. |
+| `PresentationAdapter` | Plain C# | Reads store change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`) to manage creep GameObjects via object pool. Updates `Transform.position` from sim data. |
 
 #### Game State Machine
 
@@ -82,8 +89,9 @@ Reset: Transitioning back to `Init` triggers `PlayingState.Exit()` (tear down sp
 #### Component & System Pattern
 
 - **Scene components** (MonoBehaviours): Thin scene presence. Hold serialized references, identify GameObjects for system discovery, no game logic. Examples: `HomeBaseComponent`, `CreepComponent`, `TurretComponent`, `SpawnPointComponent`. Throughout this document, "component" always refers to these MonoBehaviour scene markers — not simulation data.
-- **Simulation data** (plain C# classes, structs, or arrays): The authoritative game state that systems read and write. Positions, health, targets, economy balance, status effects. No Unity types (`Transform`, `GameObject`) in sim data. At this project's entity counts (tens of creeps, tens of turrets), classes are the pragmatic default — they avoid the copy-modify-write-back friction of mutable structs stored in collections. Reserve structs for small, immutable value types (e.g., `GridPosition`) or cases where cache locality measurably matters.
-- **Systems** (plain C# classes implementing `IGameSystem`): Own all game logic and the simulation data for their domain. Created by `GameBootstrap`, registered with `SystemScheduler` as an ordered array, ticked in deterministic order. Systems are global — they exist independently of game states. The state machine gates *when* systems tick, not *who* ticks them. Examples: `SpawnSystem`, `MovementSystem`, `TargetingSystem`, `DamageSystem`, `EconomySystem`, `WaveSystem`.
+- **Stores** (plain C# classes): Authoritative owners of simulation data collections. Stores manage the lifecycle of their entities: add, mark for removal, flush deferred removals. Stores expose per-frame change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`) that consumers (presentation adapter, other stores) read without events. `GameSession` owns all stores and calls `BeginFrame()` at a known phase boundary. Examples: `CreepStore` (future: `TurretStore`, `ProjectileStore`).
+- **Simulation data** (plain C# classes): Per-entity game state held in stores. Positions, health, targets, economy balance, status effects. No Unity types (`Transform`, `GameObject`) in sim data. At this project's entity counts (tens of creeps, tens of turrets), classes are the pragmatic default — they avoid the copy-modify-write-back friction of mutable structs stored in collections. Reserve structs for small, immutable value types (e.g., `GridPosition`) or cases where cache locality measurably matters.
+- **Systems** (plain C# classes implementing `IGameSystem`): Own all game logic. Depend on stores for data access, not on other systems. Created by `GameBootstrap`, registered with `SystemScheduler` as an ordered array, ticked in deterministic order. Systems are global — they exist independently of game states. The state machine gates *when* systems tick, not *who* ticks them. Examples: `SpawnSystem`, `MovementSystem`, `TargetingSystem`, `DamageSystem`, `EconomySystem`, `WaveSystem`.
 
 The system tick order is configured in `GameBootstrap` — the composition root is the single source of truth for both the transition table and the system execution order:
 
@@ -99,16 +107,22 @@ var systemScheduler = new SystemScheduler(new IGameSystem[]
 });
 ```
 
-`GameBootstrap.Update()` ticks the scheduler when the state machine is in a gameplay state:
+`GameBootstrap.Update()` manages the per-frame lifecycle:
 
 ```
+presentationAdapter.CollectInput();
+stateMachine.Tick(Time.deltaTime);
+
 if (stateMachine.CurrentStateId == GameState.Playing)
 {
+    gameSession.BeginFrame();           // Flush deferred removals, clear frame lists
     systemScheduler.Tick(Time.deltaTime);
 }
+
+presentationAdapter.SyncVisuals();      // Read store change lists and active data
 ```
 
-Systems operate on plain simulation data (structs, arrays) — not on MonoBehaviour references directly. A thin presentation adapter layer syncs simulation state to/from scene objects each frame. Components do not contain game logic.
+Systems operate on stores — not on MonoBehaviour references directly. Stores own the authoritative simulation data. A thin presentation adapter layer reads store change lists and active data to sync to/from scene objects each frame. Components do not contain game logic.
 
 #### Event Messaging
 
@@ -128,34 +142,38 @@ Systems operate on plain simulation data (structs, arrays) — not on MonoBehavi
 
 The simulation and presentation are separated by an explicit data boundary:
 
-- **Simulation model** — Plain C# data (structs, arrays) owned by systems. All gameplay state lives here: creep positions, health values, turret targets, projectile positions, economy balance. Systems read and write *only* this data. No `Transform`, no `GameObject`, no MonoBehaviour references in system code.
-- **Presentation adapter** — A thin layer that runs after all system ticks. Reads simulation state and writes to Unity objects (`Transform.position`, enable/disable GameObjects, UI updates). Also reads Unity inputs that the sim needs (e.g., mouse position via raycast) and writes them into sim-readable input structs *before* systems tick.
-- **Boundary rule** — Data flows one direction per phase: Unity → input structs → systems → sim state → presentation adapter → Unity. Systems never call Unity APIs directly.
+- **Simulation model** — Plain C# data (classes) owned by stores. All gameplay state lives here: creep positions, health values, turret targets, projectile positions, economy balance. Systems read and write store data through the store's public API. No `Transform`, no `GameObject`, no MonoBehaviour references in system code.
+- **Presentation adapter** — A thin layer that runs after all system ticks. Reads store change lists and active data, writes to Unity objects (`Transform.position`, enable/disable GameObjects, UI updates). Also reads Unity inputs that the sim needs (e.g., mouse position via raycast) and writes them into sim-readable input structs *before* systems tick.
+- **Boundary rule** — Data flows one direction per phase: Unity → input structs → stores → systems → stores → presentation adapter → Unity. Systems never call Unity APIs directly.
 
 **Testability implication:** Edit Mode tests create simulation data, tick systems, and assert on results — no GameObjects, no scene, no Play Mode required. Any system that needs information from Unity (physics queries, input) receives it through an interface that tests can stub.
 
-#### System Data Ownership
+#### Store Data Ownership
 
-Each simulation data domain has a single authoritative system — the only system allowed to write that data. Other systems may read it but never mutate it directly. This single-writer principle prevents hidden cross-mutation and ordering-dependent bugs.
+Simulation data lives in stores. Each field within the data has a single authoritative writer — the only system allowed to write that field. Other systems may read it but never mutate it directly. This single-writer principle prevents hidden cross-mutation and ordering-dependent bugs.
 
-| Data Domain | Owner (Writer) | Readers |
-|-------------|---------------|---------|
-| Creep spawn queue | WaveSystem | SpawnSystem |
-| Active creep registry | SpawnSystem | MovementSystem, TargetingSystem, DamageSystem |
-| Creep positions & velocity | MovementSystem | TargetingSystem, DamageSystem, PresentationAdapter |
-| Creep health | DamageSystem | EconomySystem (death event), PresentationAdapter |
-| Turret placement & positions | PlacementSystem | TargetingSystem, PresentationAdapter |
-| Turret target assignments | TargetingSystem | ProjectileSystem |
-| Projectile positions & state | ProjectileSystem | DamageSystem, PresentationAdapter |
-| Base health | DamageSystem | PlayingState (end condition), PresentationAdapter |
-| Coin balance | EconomySystem | PlacementSystem (affordability), PresentationAdapter |
-| Wave progress | WaveSystem | PlayingState (end condition), PresentationAdapter |
-| Player input (placement) | PresentationAdapter | PlacementSystem |
-| Active status effects (slow, etc.) | DamageSystem | MovementSystem |
+Stores themselves provide lifecycle operations (`Add`, `MarkForRemoval`, `BeginFrame`) and per-frame change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`). Systems call these methods; systems do not depend on each other.
 
-Cross-system communication happens through the deterministic tick order, not through event-driven mutation. Example: when DamageSystem kills a creep, it fires `OnCreepKilled`. EconomySystem hears this event and buffers a pending coin credit — but it does not write to creep data or economy state during the handler. It applies the credit during its own `Tick()`. This guarantees that system execution order, not subscription order, determines when state changes take effect.
+| Data Domain | Store | Writer(s) | Readers |
+|-------------|-------|-----------|---------|
+| Active creep registry | CreepStore | SpawnSystem (Add), MovementSystem (MarkForRemoval) | TargetingSystem, DamageSystem, PresentationAdapter |
+| Creep positions | CreepStore (field: Position) | MovementSystem | TargetingSystem, DamageSystem, PresentationAdapter |
+| Creep arrival flag | CreepStore (field: ReachedBase) | MovementSystem | MovementSystem (skip check) |
+| Creep spawn queue | (Future: WaveStore) | WaveSystem | SpawnSystem |
+| Creep positions & velocity | CreepStore (field: Position) | MovementSystem | TargetingSystem, DamageSystem, PresentationAdapter |
+| Creep health | CreepStore (field: Health) | DamageSystem | EconomySystem, PresentationAdapter |
+| Turret placement & positions | (Future: TurretStore) | PlacementSystem | TargetingSystem, PresentationAdapter |
+| Turret target assignments | (Future: TurretStore) | TargetingSystem | ProjectileSystem |
+| Projectile positions & state | (Future: ProjectileStore) | ProjectileSystem | DamageSystem, PresentationAdapter |
+| Base health | (Future: BaseStore) | DamageSystem | PlayingState (end condition), PresentationAdapter |
+| Coin balance | (Future: EconomyStore) | EconomySystem | PlacementSystem (affordability), PresentationAdapter |
+| Wave progress | (Future: WaveStore) | WaveSystem | PlayingState (end condition), PresentationAdapter |
+| Player input (placement) | PresentationAdapter | - | PlacementSystem |
+| Active status effects (slow, etc.) | CreepStore (field: effects) | DamageSystem | MovementSystem |
 
-**Status effect pattern (Story 7):** The freezing turret introduces a cross-system concern — DamageSystem applies a slow effect, but MovementSystem owns creep velocity. To preserve single-writer discipline: DamageSystem writes status effect records (effect type, duration, remaining time) to a per-creep status effect list it owns. MovementSystem reads those records during its tick and adjusts speed accordingly. DamageSystem never writes to velocity; MovementSystem never writes to status effects. The phase ordering guarantees that Combat (Phase 2) writes effects before the next frame's World Update (Phase 1) reads them.
+Cross-system communication happens through the deterministic tick order and store change lists, not through event-driven mutation. Systems write to stores during their `Tick()`. Stores buffer deferred operations (e.g., `MarkForRemoval`) and expose per-frame change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`). `GameSession.BeginFrame()` flushes deferred operations at a known phase boundary, before systems tick. This guarantees that system execution order determines when state changes take effect.
+
+**Status effect pattern (Story 7):** The freezing turret introduces a cross-system concern — DamageSystem applies a slow effect, but MovementSystem owns creep velocity. To preserve single-writer discipline: DamageSystem writes status effect records (effect type, duration, remaining time) to a per-creep status effect field in CreepStore. MovementSystem reads those records during its tick and adjusts speed accordingly. DamageSystem never writes to velocity; MovementSystem never writes to status effects. The phase ordering guarantees that Combat (Phase 2) writes effects before the next frame's World Update (Phase 1) reads them.
 
 #### MVU UI Boundaries
 
@@ -167,24 +185,25 @@ No direct UI-to-game-state mutation.
 
 #### Object Pooling (Story 2+)
 
-Creeps and projectiles use pre-allocated object pools managed by their respective systems. `IPoolable` interface provides consistent `OnPoolGet()` / `OnPoolReturn()` lifecycle. Pools `Clear()` and rebuild on game reset — no residual allocations.
+Creeps and projectiles use pre-allocated object pools managed by the `PresentationAdapter`. The `ObjectPooling` namespace provides `IPoolable` interface (`OnPoolGet()` / `OnPoolReturn()`) and `GameObjectPool` (stack-based, pre-allocated). `Get(position)` sets transform position before activation to avoid one-frame visual pop. Pools `Clear()` and rebuild on game reset — no residual allocations.
 
 #### Folder Organization
 
 ```
 Assets/Scripts/
-├── Core/               # GameBootstrap, GameStateMachine, SystemScheduler, GameState, GameTrigger, IGameState, IGameSystem, states
+├── Core/               # GameBootstrap, GameSession, GameStateMachine, SystemScheduler, PresentationAdapter, states, enums, interfaces
+├── ObjectPooling/      # IPoolable, GameObjectPool (namespaced: ObjectPooling)
 ├── HomeBase/           # HomeBaseComponent
-├── Creeps/             # (Story 2+) SpawnPointComponent, SpawnSystem, MovementSystem
+├── Creeps/             # CreepStore, CreepSimData, SpawnSystem, MovementSystem, SpawnPointComponent, CreepComponent
 ├── Turrets/            # (Story 4+) TurretComponent, PlacementSystem, TargetingSystem
 ├── Combat/             # (Story 5+) ProjectileSystem, DamageSystem
 ├── Economy/            # (Story 6+) EconomySystem
 ├── Waves/              # (Story 9) WaveSystem
-├── Data/               # ScriptableObject definitions (CreepDef, TurretDef, WaveDef, EconomyConfig)
+├── Data/               # ScriptableObject definitions (CreepDef, SpawnConfig, TurretDef, WaveDef, EconomyConfig)
 └── UI/                 # UI Toolkit binding, HUD controller
 ```
 
-No project-wide namespace. Feature folders group related components, systems, and data.
+No project-wide namespace. Feature folders group related components, systems, stores, and data. Generic reusable infrastructure (`ObjectPooling`) gets its own namespace.
 
 #### Extension Points
 
@@ -234,18 +253,28 @@ These constraints come directly from the spec and must be respected during imple
 
 ## 5. Data Configuration Strategy
 
-The spec emphasizes making gameplay values "easy to tweak and tune." This section defines how tunable data is exposed.
+The spec emphasizes making gameplay values "easy to tweak and tune." All gameplay-facing tuning values live in ScriptableObject assets, editable in the Unity Inspector without code changes. Systems receive primitive values extracted from SOs at bootstrap time — they never hold SO references directly.
 
-_To be filled out during architecture discussion._
+### Defined ScriptableObjects
 
-<!--
-Considerations:
-- ScriptableObjects for creep definitions (speed, HP, coin reward) and turret definitions (damage, range, fire rate, cost, effect type)
-- ScriptableObjects or serialized data for wave definitions (which creeps, how many, spawn interval, delay between waves)
-- Serialized fields on MonoBehaviours for per-instance overrides vs. shared SO data
-- Economy starting values (initial coins)
-- Base health
--->
+| SO Class | Fields | Purpose | Story |
+|----------|--------|---------|-------|
+| `CreepDef` | `float speed` | Per-creep-type stats. Future: `int maxHealth`, `int coinReward`. | 2 |
+| `SpawnConfig` | `float spawnInterval`, `int creepsPerSpawn` | Spawn timing. Temporary driver until WaveSystem (Story 9) takes over. | 2 |
+
+### Planned ScriptableObjects (not yet implemented)
+
+| SO Class | Expected Fields | Purpose | Story |
+|----------|----------------|---------|-------|
+| `TurretDef` | damage, range, fireRate, cost, effectType | Per-turret-type stats | 4-7 |
+| `WaveDef` | creep types, counts, intervals, delay | Per-wave spawn schedule | 9 |
+| `EconomyConfig` | startingCoins | Global economy tuning | 6 |
+
+### Asset Loading
+
+- **ScriptableObject assets**: Direct serialized field references for now. Addressables when extensibility is needed (Story 8+, multiple creep/turret types loaded dynamically).
+- **Visual prefabs**: Direct serialized field references on `GameBootstrap`.
+- **No `Resources/` folder**: All assets via direct references or Addressables.
 
 ---
 

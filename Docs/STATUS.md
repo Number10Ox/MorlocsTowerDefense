@@ -6,16 +6,27 @@
 |---------|--------|-------|
 | 1. Core Functionality | Complete | All key systems documented |
 | 2. Architecture - Guiding Principles | Complete | 6 principles established |
-| 2. Architecture - Detailed Design | Not started | Topics listed in HTML comment; fill out through discussion before implementation |
+| 2. Architecture - Detailed Design | In progress | Bootstrap, state machine, system scheduler, store pattern documented |
 | 3. Constraints & Ground Rules | Complete | 9 constraints from spec + tool constraint |
 | 4. Tech Package Choices | Complete | Input System, UI Toolkit, UGUI (provided popups), Addressables (SO data), Cinemachine dropped |
-| 5. Data Configuration Strategy | Not started | Considerations listed in HTML comment; define SO structures before Story 2 |
+| 5. Data Configuration Strategy | In progress | CreepDef and SpawnConfig SOs defined; more SOs to come in later stories |
 | 6. Provided Assets Reference | Complete | All prefabs, scene, terrain, materials cataloged |
 | 7. Deliverables - User Stories | Complete | Stories 1-10 with acceptance criteria |
 
 ## Implementation Progress
 
-No stories have been started. Story 1 (Project Foundation) is next.
+| Story | Status | Notes |
+|-------|--------|-------|
+| Story 1: Project Foundation | Complete | Game bootstrap, state machine, system scheduler, folder structure, test infrastructure |
+| Story 2: Creep Spawning & Movement | Complete | CreepStore, SpawnSystem, MovementSystem, object pooling, PresentationAdapter sync |
+| Story 3: Base Health & Lose Condition | Not started | |
+| Story 4: Turret Placement | Not started | |
+| Story 5: Turret Shooting & Creep Damage | Not started | |
+| Story 6: Economy System | Not started | |
+| Story 7: Turret Types (Regular & Freezing) | Not started | |
+| Story 8: Creep Variety | Not started | |
+| Story 9: Wave System | Not started | |
+| Story 10: Game Reset | Not started | |
 
 ## Key Decisions Made
 
@@ -26,8 +37,13 @@ No stories have been started. Story 1 (Project Foundation) is next.
 - Architectural preferences also in `.claude/CLAUDE.md`; TDD section 2 captures project-specific guiding principles
 - No LINQ in runtime code (global rule)
 - Custom state machine (no Stateless library)
+- **Store pattern for simulation data**: Data lives in stores (e.g., `CreepStore`), not in systems. Systems read/write stores via their public API. `GameSession` owns all stores and manages per-frame lifecycle (`BeginFrame()` flushes deferred removals, clears per-frame change lists).
+- **No system-to-system dependencies**: Systems depend on stores, not on each other. Eliminates coupling chains.
+- **Buffered change lists**: Stores expose `SpawnedThisFrame` and `RemovedIdsThisFrame` instead of inter-system events for presentation sync.
+- **Object pooling**: `ObjectPooling` namespace with `IPoolable` interface and `GameObjectPool`. Position set before activation to avoid visual pop.
+- **Systems take primitives**: Systems receive plain values (float, int, Vector3) from SOs at construction — not SO references. Keeps systems purely testable.
 
 ## Open Questions
 
-- Detailed design topics (section 2) need discussion before implementation begins
-- Data configuration strategy (section 5) needs to define specific SO structures
+- Addressables loading infrastructure (deferred until extensibility is needed, likely Story 8)
+- Remaining Data Configuration Strategy entries (turret defs, wave defs, economy config)

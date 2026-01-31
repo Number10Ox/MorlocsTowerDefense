@@ -4,14 +4,14 @@ public class SystemScheduler
 
     public SystemScheduler(IGameSystem[] systems)
     {
-        this.systems = systems;
+        this.systems = systems ?? System.Array.Empty<IGameSystem>();
     }
 
     public void Tick(float deltaTime)
     {
         for (int i = 0; i < systems.Length; i++)
         {
-            systems[i].Tick(deltaTime);
+            systems[i]?.Tick(deltaTime);
         }
     }
 }

@@ -8,7 +8,7 @@ public class InitState : IGameState
 
     public InitState(Action<GameTrigger> fire, HomeBaseComponent homeBase)
     {
-        this.fire = fire;
+        this.fire = fire ?? throw new ArgumentNullException(nameof(fire));
         this.homeBase = homeBase;
     }
 

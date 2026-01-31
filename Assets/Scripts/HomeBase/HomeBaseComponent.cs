@@ -1,5 +1,6 @@
 using UnityEngine;
 
-public class HomeBaseComponent : MonoBehaviour
+[DisallowMultipleComponent]
+public sealed class HomeBaseComponent : MonoBehaviour
 {
 }

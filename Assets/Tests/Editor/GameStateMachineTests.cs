@@ -308,21 +308,25 @@ public class GameStateMachineTests
     public void FullFlow_InitToPlaying_TransitionsOnFirstTick()
     {
         var homeBase = new GameObject("Base").AddComponent<HomeBaseComponent>();
+        try
+        {
+            var stateMachine = new GameStateMachine();
+            var initState = new InitState(stateMachine.Fire, homeBase);
+            var playingState = new PlayingState(stateMachine.Fire);
 
-        var stateMachine = new GameStateMachine();
-        var initState = new InitState(stateMachine.Fire, homeBase);
-        var playingState = new PlayingState(stateMachine.Fire);
+            stateMachine.AddState(GameState.Init, initState);
+            stateMachine.AddState(GameState.Playing, playingState);
+            stateMachine.AddTransition(GameState.Init, GameTrigger.SceneValidated, GameState.Playing);
 
-        stateMachine.AddState(GameState.Init, initState);
-        stateMachine.AddState(GameState.Playing, playingState);
-        stateMachine.AddTransition(GameState.Init, GameTrigger.SceneValidated, GameState.Playing);
+            stateMachine.Start(GameState.Init);
+            Assert.AreEqual(GameState.Init, stateMachine.CurrentStateId);
 
-        stateMachine.Start(GameState.Init);
-        Assert.AreEqual(GameState.Init, stateMachine.CurrentStateId);
-
-        stateMachine.Tick(0.016f);
-        Assert.AreEqual(GameState.Playing, stateMachine.CurrentStateId);
-
-        UnityEngine.Object.DestroyImmediate(homeBase.gameObject);
+            stateMachine.Tick(0.016f);
+            Assert.AreEqual(GameState.Playing, stateMachine.CurrentStateId);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(homeBase.gameObject);
+        }
     }
 }

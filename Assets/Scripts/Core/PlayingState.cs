@@ -6,7 +6,7 @@ public class PlayingState : IGameState
 
     public PlayingState(Action<GameTrigger> fire)
     {
-        this.fire = fire;
+        this.fire = fire ?? throw new ArgumentNullException(nameof(fire));
     }
 
     public void Enter()

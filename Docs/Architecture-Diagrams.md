@@ -311,8 +311,9 @@ flowchart TD
 ```
 Assets/
 ├── Scripts/
-│   ├── Core/                   # Bootstrap, state machine, scheduler, game loop
+│   ├── Core/                   # Bootstrap, session, state machine, scheduler, game loop
 │   │   ├── GameBootstrap.cs
+│   │   ├── GameSession.cs
 │   │   ├── GameStateMachine.cs
 │   │   ├── SystemScheduler.cs
 │   │   ├── PresentationAdapter.cs
@@ -322,19 +323,37 @@ Assets/
 │   │   ├── IGameSystem.cs      # interface
 │   │   ├── InitState.cs
 │   │   └── PlayingState.cs
+│   ├── ObjectPooling/          # Reusable pool infrastructure (namespaced)
+│   │   ├── IPoolable.cs
+│   │   └── GameObjectPool.cs
 │   ├── HomeBase/               # Home base identification component
 │   │   └── HomeBaseComponent.cs
-│   ├── Creeps/                 # (Story 2+)
+│   ├── Creeps/                 # Creep store, sim data, systems, components
+│   │   ├── CreepStore.cs
+│   │   ├── CreepSimData.cs
+│   │   ├── SpawnSystem.cs
+│   │   ├── MovementSystem.cs
+│   │   ├── SpawnPointComponent.cs
+│   │   └── CreepComponent.cs
+│   ├── Data/                   # ScriptableObject definitions
+│   │   ├── CreepDef.cs
+│   │   └── SpawnConfig.cs
 │   ├── Turrets/                # (Story 4+)
 │   ├── Combat/                 # (Story 5+)
 │   ├── Economy/                # (Story 6+)
 │   ├── Waves/                  # (Story 9)
-│   ├── Data/                   # ScriptableObject definitions
 │   └── UI/                     # UI Toolkit binding
 ├── Tests/
 │   ├── Editor/
 │   │   ├── EditModeTests.asmdef
-│   │   └── GameStateMachineTests.cs
+│   │   ├── GameStateMachineTests.cs
+│   │   ├── InitStateTests.cs
+│   │   ├── SystemSchedulerTests.cs
+│   │   ├── CreepStoreTests.cs
+│   │   ├── SpawnSystemTests.cs
+│   │   ├── MovementSystemTests.cs
+│   │   ├── GameObjectPoolTests.cs
+│   │   └── CreepSpawningIntegrationTests.cs
 │   └── Runtime/
 │       └── RuntimeTests.asmdef
 ├── Prefabs/                    # (provided, unchanged)
@@ -343,4 +362,156 @@ Assets/
 └── Terrain/                    # (provided, unchanged)
 ```
 
-No project-wide namespace. Feature folders group related components, systems, and data.
+No project-wide namespace. Feature folders group related components, systems, stores, and data. Generic reusable infrastructure (`ObjectPooling`) gets its own namespace.
+
+---
+
+## Story 2 — Creep Spawning & Movement
+
+### Class Diagram
+
+```mermaid
+classDiagram
+    class GameSession {
+        +CreepStore CreepStore
+        +BeginFrame()
+        +Reset()
+    }
+
+    class CreepStore {
+        -List~CreepSimData~ activeCreeps
+        -List~int~ pendingRemovals
+        -List~CreepSimData~ spawnedThisFrame
+        -List~int~ removedIdsThisFrame
+        +IReadOnlyList~CreepSimData~ ActiveCreeps
+        +IReadOnlyList~CreepSimData~ SpawnedThisFrame
+        +IReadOnlyList~int~ RemovedIdsThisFrame
+        +Add(CreepSimData)
+        +MarkForRemoval(int)
+        +BeginFrame()
+        +Reset()
+    }
+
+    class CreepSimData {
+        +int Id
+        +Vector3 Position
+        +Vector3 Target
+        +float Speed
+        +bool ReachedBase
+    }
+
+    class SpawnSystem {
+        -CreepStore creepStore
+        -Vector3[] spawnPositions
+        -float spawnInterval
+        -int creepsPerSpawn
+        -float creepSpeed
+        -float spawnTimer
+        -int nextCreepId
+        +Tick(float deltaTime)
+    }
+
+    class MovementSystem {
+        -CreepStore creepStore
+        -float arrivalThreshold
+        +Tick(float deltaTime)
+    }
+
+    class SpawnPointComponent {
+        <<MonoBehaviour>>
+    }
+
+    class CreepComponent {
+        <<MonoBehaviour>>
+        -int creepId
+        +int CreepId
+        +Initialize(int)
+        +OnPoolGet()
+        +OnPoolReturn()
+    }
+
+    class GameObjectPool {
+        <<ObjectPooling>>
+        -Stack~GameObject~ available
+        +Get(Vector3 position) GameObject
+        +Return(GameObject)
+        +Clear()
+    }
+
+    class IPoolable {
+        <<interface>>
+        <<ObjectPooling>>
+        +OnPoolGet()
+        +OnPoolReturn()
+    }
+
+    GameSession --> CreepStore : owns
+    CreepStore --> "0..*" CreepSimData : stores
+    SpawnSystem --> CreepStore : writes via Add()
+    MovementSystem --> CreepStore : reads ActiveCreeps‚ writes via MarkForRemoval()
+    SpawnSystem ..|> IGameSystem
+    MovementSystem ..|> IGameSystem
+    CreepComponent ..|> IPoolable
+    PresentationAdapter --> CreepStore : reads change lists
+    PresentationAdapter --> GameObjectPool : manages creep GOs
+    GameBootstrap --> GameSession : owns
+```
+
+**Notes:**
+- `SpawnSystem` and `MovementSystem` depend only on `CreepStore`, never on each other. No system-to-system coupling.
+- `CreepStore` manages deferred removals: `MarkForRemoval()` buffers IDs, `BeginFrame()` flushes them and populates `RemovedIdsThisFrame`.
+- `PresentationAdapter` reads `SpawnedThisFrame` and `RemovedIdsThisFrame` to efficiently manage the object pool — no O(n^2) diffing.
+- `GameObjectPool.Get(position)` sets transform position before activation to avoid one-frame visual pop at origin.
+
+### Creep Lifecycle Sequence
+
+```mermaid
+sequenceDiagram
+    participant Bootstrap as GameBootstrap
+    participant Session as GameSession
+    participant Store as CreepStore
+    participant Spawn as SpawnSystem
+    participant Move as MovementSystem
+    participant Pres as PresentationAdapter
+    participant Pool as GameObjectPool
+
+    Note over Bootstrap: Frame N — spawn frame
+
+    Bootstrap->>Session: BeginFrame()
+    Session->>Store: BeginFrame()
+    Note over Store: Flush pending removals‚ clear frame lists
+
+    Bootstrap->>Spawn: Tick(dt)
+    Spawn->>Store: Add(creepSimData)
+    Note over Store: Added to activeCreeps + spawnedThisFrame
+
+    Bootstrap->>Move: Tick(dt)
+    Note over Move: Moves creep toward base
+
+    Bootstrap->>Pres: SyncVisuals()
+    Pres->>Store: Read SpawnedThisFrame
+    Pres->>Pool: Get(position)
+    Note over Pres: Creates GO‚ maps to creep ID
+
+    Pres->>Store: Read ActiveCreeps
+    Note over Pres: Updates Transform.position
+
+    Note over Bootstrap: Frame N+K — arrival frame
+
+    Bootstrap->>Session: BeginFrame()
+    Bootstrap->>Move: Tick(dt)
+    Note over Move: Detects distance ≤ threshold
+    Move->>Store: MarkForRemoval(id)
+    Note over Store: Buffered in pendingRemovals
+
+    Note over Bootstrap: Frame N+K+1 — removal frame
+
+    Bootstrap->>Session: BeginFrame()
+    Session->>Store: BeginFrame()
+    Note over Store: Flush removal → removedIdsThisFrame
+
+    Bootstrap->>Pres: SyncVisuals()
+    Pres->>Store: Read RemovedIdsThisFrame
+    Pres->>Pool: Return(GO)
+    Note over Pres: Returns GO to pool‚ removes from map
+```
