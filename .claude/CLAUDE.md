@@ -135,3 +135,5 @@ Before a deliverable is considered complete:
 - All acceptance criteria have passing tests
 - Edge cases identified and tested or documented as out of scope
 - No regressions in previously passing tests
+- TDD.md updated to reflect any architectural changes made during implementation
+- Architecture-Diagrams.md updated to reflect any structural changes (new classes, changed relationships, modified sequences)

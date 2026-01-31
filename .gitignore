@@ -58,7 +58,8 @@ ProjectSettings/GvlGraphicsSettings.asset
 ProjectSettings/WebGL*
 
 # Packages
-Packages/
+Packages/*
+!Packages/manifest.json
 packages-lock.json
 
 # Local environment

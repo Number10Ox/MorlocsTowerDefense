@@ -36,23 +36,24 @@ See [Architecture Diagrams](Architecture-Diagrams.md) for class diagrams, state 
 
 #### Bootstrap & Game Loop
 
-A single `GameBootstrap` MonoBehaviour in MainScene serves as the entry point and composition root. It creates the `GameStateMachine`, all `IGameState` implementations, and all gameplay systems. `Update()` delegates to the state machine, which ticks the current state.
+A single `GameBootstrap` MonoBehaviour in MainScene serves as the entry point and composition root. It creates the `GameStateMachine`, all `IGameState` implementations, the `SystemScheduler`, and all gameplay systems. `Update()` ticks the state machine for flow control, then ticks the system scheduler when in gameplay states.
 
 ```
-GameBootstrap.Update() → GameStateMachine.Tick() → IGameState.Tick() → [System ticks in PlayingState]
+GameBootstrap.Update() → GameStateMachine.Tick() → SystemScheduler.Tick() (gated by state)
 ```
 
 #### Class Responsibilities
 
 | Class | Type | Responsibility |
 |-------|------|---------------|
-| `GameBootstrap` | MonoBehaviour | Composition root. Creates state machine, states, systems. Configures transition table. Drives game loop via `Update()`. |
+| `GameBootstrap` | MonoBehaviour | Composition root. Creates state machine, states, system scheduler, and systems. Configures transition table. Drives game loop via `Update()`. Gates system ticking by current state. |
 | `GameStateMachine` | Plain C# | Owns state registry and transition table. Resolves triggers to transitions. Fires `OnStateChanged` event. Processes pending triggers at tick start. |
 | `GameState` | Enum | State identifiers: `Init`, `Playing`, `Win`, `Lose`. |
 | `GameTrigger` | Enum | Semantic transition triggers: `SceneValidated`, `BaseDestroyed`, `AllWavesCleared`, `RestartRequested`. |
 | `IGameState` | Interface | Contract for game states: `Enter()`, `Tick(float)`, `Exit()`. |
 | `InitState` | Plain C# : `IGameState` | Validates scene setup (Base, SpawnPoints). Fires `SceneValidated`. Future: async Addressable loading. |
-| `PlayingState` | Plain C# : `IGameState` | Ticks `IGameSystem[]` in registered order. Fires `BaseDestroyed` / `AllWavesCleared` when conditions met. |
+| `PlayingState` | Plain C# : `IGameState` | Manages gameplay flow. Fires `BaseDestroyed` / `AllWavesCleared` when conditions met. Does not own or tick systems. |
+| `SystemScheduler` | Plain C# | Owns the ordered `IGameSystem[]` array. Ticks systems sequentially. Owned by `GameBootstrap`, ticked when state machine is in gameplay states. |
 | `IGameSystem` | Interface | Contract for gameplay systems: `Tick(float)`. |
 | `HomeBaseComponent` | MonoBehaviour | Thin component on Base GameObject. Identifies the base for system discovery. Future stories add health data. |
 
@@ -82,12 +83,12 @@ Reset: Transitioning back to `Init` triggers `PlayingState.Exit()` (tear down sp
 
 - **Scene components** (MonoBehaviours): Thin scene presence. Hold serialized references, identify GameObjects for system discovery, no game logic. Examples: `HomeBaseComponent`, `CreepComponent`, `TurretComponent`, `SpawnPointComponent`. Throughout this document, "component" always refers to these MonoBehaviour scene markers — not simulation data.
 - **Simulation data** (plain C# classes, structs, or arrays): The authoritative game state that systems read and write. Positions, health, targets, economy balance, status effects. No Unity types (`Transform`, `GameObject`) in sim data. At this project's entity counts (tens of creeps, tens of turrets), classes are the pragmatic default — they avoid the copy-modify-write-back friction of mutable structs stored in collections. Reserve structs for small, immutable value types (e.g., `GridPosition`) or cases where cache locality measurably matters.
-- **Systems** (plain C# classes implementing `IGameSystem`): Own all game logic and the simulation data for their domain. Created by `GameBootstrap`, registered with `PlayingState` as an ordered array, ticked in deterministic order. Examples: `SpawnSystem`, `MovementSystem`, `TargetingSystem`, `DamageSystem`, `EconomySystem`, `WaveSystem`.
+- **Systems** (plain C# classes implementing `IGameSystem`): Own all game logic and the simulation data for their domain. Created by `GameBootstrap`, registered with `SystemScheduler` as an ordered array, ticked in deterministic order. Systems are global — they exist independently of game states. The state machine gates *when* systems tick, not *who* ticks them. Examples: `SpawnSystem`, `MovementSystem`, `TargetingSystem`, `DamageSystem`, `EconomySystem`, `WaveSystem`.
 
 The system tick order is configured in `GameBootstrap` — the composition root is the single source of truth for both the transition table and the system execution order:
 
 ```
-new PlayingState(stateMachine.Fire, new IGameSystem[]
+var systemScheduler = new SystemScheduler(new IGameSystem[]
 {
     // Phase 1 — World Update
     waveSystem, spawnSystem, movementSystem, placementSystem,
@@ -95,7 +96,16 @@ new PlayingState(stateMachine.Fire, new IGameSystem[]
     targetingSystem, projectileSystem, damageSystem,
     // Phase 3 — Resolution
     economySystem
-})
+});
+```
+
+`GameBootstrap.Update()` ticks the scheduler when the state machine is in a gameplay state:
+
+```
+if (stateMachine.CurrentStateId == GameState.Playing)
+{
+    systemScheduler.Tick(Time.deltaTime);
+}
 ```
 
 Systems operate on plain simulation data (structs, arrays) — not on MonoBehaviour references directly. A thin presentation adapter layer syncs simulation state to/from scene objects each frame. Components do not contain game logic.
@@ -163,7 +173,7 @@ Creeps and projectiles use pre-allocated object pools managed by their respectiv
 
 ```
 Assets/Scripts/
-├── Core/               # GameBootstrap, GameStateMachine, GameState, GameTrigger, IGameState, IGameSystem, states
+├── Core/               # GameBootstrap, GameStateMachine, SystemScheduler, GameState, GameTrigger, IGameState, IGameSystem, states
 ├── HomeBase/           # HomeBaseComponent
 ├── Creeps/             # (Story 2+) SpawnPointComponent, SpawnSystem, MovementSystem
 ├── Turrets/            # (Story 4+) TurretComponent, PlacementSystem, TargetingSystem
