@@ -137,7 +137,7 @@ Implementation order is designed to build systems incrementally, with each story
 - Game bootstrap / entry point exists and runs on Play
 - Game state machine is implemented with at least `Init` and `Playing` states
 - Base has a component that systems can discover
-- Folder structure and namespace (`MorlocsTD`) are established
+- Folder structure is established under `Assets/Scripts/`
 - Test infrastructure is set up (Edit Mode and Play Mode test assemblies exist and run)
 - A test verifies the game state machine transitions from `Init` to `Playing`
 

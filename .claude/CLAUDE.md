@@ -33,7 +33,7 @@ At the start of each session, check for and read the following files if they exi
 
 ### Code Organization
 
-- **Namespaces**: Always use a project namespace
+- **Namespaces**: Only use namespaces for libraries and reusable modules. Application code does not get a project-wide namespace. If code is meant to be consumed by other assemblies or projects, give it a namespace; otherwise omit it.
 - **Folder structure**: Feature-based organization under `Assets/Scripts/`
 - **Using statements**: System first, then UnityEngine, then project namespaces
 - **Member order in classes**: Fields, then lifecycle methods (`Awake`/`Start`/`Update`/`OnDestroy`), then public methods, then private methods
