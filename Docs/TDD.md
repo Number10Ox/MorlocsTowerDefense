@@ -32,21 +32,157 @@ These are architectural directions that will inform the detailed design. Not ful
 
 ### Detailed Design
 
-_To be filled out through discussion and manual editing._
+See [Architecture Diagrams](Architecture-Diagrams.md) for class diagrams, state diagrams, and sequence diagrams.
 
-<!--
-Topics to cover:
-- High-level system diagram / dependency graph
-- Manager vs. component responsibilities
-- Event/messaging approach (C# events, UnityEvents, ScriptableObject events, etc.)
-- Object pooling strategy for creeps and projectiles
-- How turret placement interacts with the input system
-- How wave definitions are structured and sequenced
-- Game state machine (Menu -> Playing -> Win/Lose -> Reset)
-- Folder / namespace organization
-- Where the "model" lives relative to MonoBehaviour state
-- How MVU boundaries work: what is the model, what generates update messages, what re-renders
--->
+#### Bootstrap & Game Loop
+
+A single `GameBootstrap` MonoBehaviour in MainScene serves as the entry point and composition root. It creates the `GameStateMachine`, all `IGameState` implementations, and all gameplay systems. `Update()` delegates to the state machine, which ticks the current state.
+
+```
+GameBootstrap.Update() → GameStateMachine.Tick() → IGameState.Tick() → [System ticks in PlayingState]
+```
+
+#### Class Responsibilities
+
+| Class | Type | Responsibility |
+|-------|------|---------------|
+| `GameBootstrap` | MonoBehaviour | Composition root. Creates state machine, states, systems. Configures transition table. Drives game loop via `Update()`. |
+| `GameStateMachine` | Plain C# | Owns state registry and transition table. Resolves triggers to transitions. Fires `OnStateChanged` event. Processes pending triggers at tick start. |
+| `GameState` | Enum | State identifiers: `Init`, `Playing`, `Win`, `Lose`. |
+| `GameTrigger` | Enum | Semantic transition triggers: `SceneValidated`, `BaseDestroyed`, `AllWavesCleared`, `RestartRequested`. |
+| `IGameState` | Interface | Contract for game states: `Enter()`, `Tick(float)`, `Exit()`. |
+| `InitState` | Plain C# : `IGameState` | Validates scene setup (Base, SpawnPoints). Fires `SceneValidated`. Future: async Addressable loading. |
+| `PlayingState` | Plain C# : `IGameState` | Ticks `IGameSystem[]` in registered order. Fires `BaseDestroyed` / `AllWavesCleared` when conditions met. |
+| `IGameSystem` | Interface | Contract for gameplay systems: `Tick(float)`. |
+| `BaseComponent` | MonoBehaviour | Thin component on Base GameObject. Identifies the base for system discovery. Future stories add health data. |
+
+#### Game State Machine
+
+**Trigger-based transitions** — States fire semantic triggers describing *what happened*; the state machine resolves triggers against a declarative transition table to determine *where to go*. States never reference other states directly.
+
+The transition table is configured in `GameBootstrap` — the single place where the full game flow is visible:
+
+```
+AddTransition(Init,    SceneValidated,  Playing)
+AddTransition(Playing, BaseDestroyed,   Lose)
+AddTransition(Playing, AllWavesCleared, Win)
+AddTransition(Win,     RestartRequested, Init)
+AddTransition(Lose,    RestartRequested, Init)
+```
+
+States receive an `Action<GameTrigger>` delegate at construction. Calling `fire(GameTrigger.SceneValidated)` sets a pending trigger. The state machine resolves pending triggers at the start of `Tick()`: lookup `(currentState, trigger)` → if valid transition exists → `Exit()` current → switch → `Enter()` new → `Tick()` new. Invalid triggers are logged and ignored. This guarantees a clean frame boundary between states.
+
+**Single-pending-trigger constraint:** `GameStateMachine` stores at most one pending trigger (`GameTrigger?`). If a state fires a second trigger before the first is resolved, the second overwrites the first and a warning is logged. This is intentional — end conditions are evaluated after all systems have settled within a single tick, and the conditions are mutually exclusive (the base cannot be both destroyed and alive when all waves clear). The single-trigger design keeps the state machine simple and avoids queue-ordering complexity. If a future project needed multiple simultaneous triggers, the field could be replaced with a queue — but for this game's state graph, it is unnecessary.
+
+States: `Init` → `Playing` → `Win` / `Lose` → `Init` (restart)
+
+Reset: Transitioning back to `Init` triggers `PlayingState.Exit()` (tear down spawned objects, reset systems), then `InitState.Enter()` (re-validate scene, set up fresh game).
+
+#### Component & System Pattern
+
+- **Scene components** (MonoBehaviours): Thin scene presence. Hold serialized references, identify GameObjects for system discovery, no game logic. Examples: `BaseComponent`, `CreepComponent`, `TurretComponent`, `SpawnPointComponent`. Throughout this document, "component" always refers to these MonoBehaviour scene markers — not simulation data.
+- **Simulation data** (plain C# classes, structs, or arrays): The authoritative game state that systems read and write. Positions, health, targets, economy balance, status effects. No Unity types (`Transform`, `GameObject`) in sim data. At this project's entity counts (tens of creeps, tens of turrets), classes are the pragmatic default — they avoid the copy-modify-write-back friction of mutable structs stored in collections. Reserve structs for small, immutable value types (e.g., `GridPosition`) or cases where cache locality measurably matters.
+- **Systems** (plain C# classes implementing `IGameSystem`): Own all game logic and the simulation data for their domain. Created by `GameBootstrap`, registered with `PlayingState` as an ordered array, ticked in deterministic order. Examples: `SpawnSystem`, `MovementSystem`, `TargetingSystem`, `DamageSystem`, `EconomySystem`, `WaveSystem`.
+
+The system tick order is configured in `GameBootstrap` — the composition root is the single source of truth for both the transition table and the system execution order:
+
+```
+new PlayingState(stateMachine.Fire, new IGameSystem[]
+{
+    // Phase 1 — World Update
+    waveSystem, spawnSystem, movementSystem, placementSystem,
+    // Phase 2 — Combat
+    targetingSystem, projectileSystem, damageSystem,
+    // Phase 3 — Resolution
+    economySystem
+})
+```
+
+Systems operate on plain simulation data (structs, arrays) — not on MonoBehaviour references directly. A thin presentation adapter layer syncs simulation state to/from scene objects each frame. Components do not contain game logic.
+
+#### Event Messaging
+
+- C# `event Action<T>` for system-to-system and system-to-UI communication
+- `?.Invoke()` for safe invocation
+- Events are notifications, not commands — receivers do not mutate the sender's state
+- Key events: `OnStateChanged`, `OnCreepKilled`, `OnCoinsChanged`, `OnBaseHealthChanged`, `OnWaveStarted`, `OnWaveCleared`
+
+**Ordering & reentrancy policy:**
+
+- Events fire inline during the producing system's `Tick()`. Because systems run sequentially in a deterministic order, event delivery order is deterministic. Within a single event invocation, C# multicast delegates (`event Action<T>`) invoke subscribers in subscription order (FIFO). Since all subscriptions are established at bootstrap time in a fixed order, listener execution order is also deterministic.
+- **Handlers must not fire game triggers or mutate simulation state they don't own.** A handler may buffer data locally (e.g., EconomySystem records a pending coin credit when it hears `OnCreepKilled`) and applies it during its own `Tick()`.
+- UI listens to events for display updates only — never writes back to simulation state. Player actions flow through an input struct read by the relevant system (e.g., `PlacementSystem`).
+- If future complexity demands decoupling, events can be replaced with a per-frame message queue. For this project's scale, inline `Action<T>` with the handler discipline above is sufficient.
+
+#### Simulation / Presentation Boundary
+
+The simulation and presentation are separated by an explicit data boundary:
+
+- **Simulation model** — Plain C# data (structs, arrays) owned by systems. All gameplay state lives here: creep positions, health values, turret targets, projectile positions, economy balance. Systems read and write *only* this data. No `Transform`, no `GameObject`, no MonoBehaviour references in system code.
+- **Presentation adapter** — A thin layer that runs after all system ticks. Reads simulation state and writes to Unity objects (`Transform.position`, enable/disable GameObjects, UI updates). Also reads Unity inputs that the sim needs (e.g., mouse position via raycast) and writes them into sim-readable input structs *before* systems tick.
+- **Boundary rule** — Data flows one direction per phase: Unity → input structs → systems → sim state → presentation adapter → Unity. Systems never call Unity APIs directly.
+
+**Testability implication:** Edit Mode tests create simulation data, tick systems, and assert on results — no GameObjects, no scene, no Play Mode required. Any system that needs information from Unity (physics queries, input) receives it through an interface that tests can stub.
+
+#### System Data Ownership
+
+Each simulation data domain has a single authoritative system — the only system allowed to write that data. Other systems may read it but never mutate it directly. This single-writer principle prevents hidden cross-mutation and ordering-dependent bugs.
+
+| Data Domain | Owner (Writer) | Readers |
+|-------------|---------------|---------|
+| Creep spawn queue | WaveSystem | SpawnSystem |
+| Active creep registry | SpawnSystem | MovementSystem, TargetingSystem, DamageSystem |
+| Creep positions & velocity | MovementSystem | TargetingSystem, DamageSystem, PresentationAdapter |
+| Creep health | DamageSystem | EconomySystem (death event), PresentationAdapter |
+| Turret placement & positions | PlacementSystem | TargetingSystem, PresentationAdapter |
+| Turret target assignments | TargetingSystem | ProjectileSystem |
+| Projectile positions & state | ProjectileSystem | DamageSystem, PresentationAdapter |
+| Base health | DamageSystem | PlayingState (end condition), PresentationAdapter |
+| Coin balance | EconomySystem | PlacementSystem (affordability), PresentationAdapter |
+| Wave progress | WaveSystem | PlayingState (end condition), PresentationAdapter |
+| Player input (placement) | PresentationAdapter | PlacementSystem |
+| Active status effects (slow, etc.) | DamageSystem | MovementSystem |
+
+Cross-system communication happens through the deterministic tick order, not through event-driven mutation. Example: when DamageSystem kills a creep, it fires `OnCreepKilled`. EconomySystem hears this event and buffers a pending coin credit — but it does not write to creep data or economy state during the handler. It applies the credit during its own `Tick()`. This guarantees that system execution order, not subscription order, determines when state changes take effect.
+
+**Status effect pattern (Story 7):** The freezing turret introduces a cross-system concern — DamageSystem applies a slow effect, but MovementSystem owns creep velocity. To preserve single-writer discipline: DamageSystem writes status effect records (effect type, duration, remaining time) to a per-creep status effect list it owns. MovementSystem reads those records during its tick and adjusts speed accordingly. DamageSystem never writes to velocity; MovementSystem never writes to status effects. The phase ordering guarantees that Combat (Phase 2) writes effects before the next frame's World Update (Phase 1) reads them.
+
+#### MVU UI Boundaries
+
+- **Model**: Simulation state exposed via read-only properties (coins, base health, wave number, selected turret type)
+- **View**: UI Toolkit documents bound to model data; provided UGUI popups toggled by game state events
+- **Update**: Player actions → commands/events → systems process → model changes → view re-reads
+
+No direct UI-to-game-state mutation.
+
+#### Object Pooling (Story 2+)
+
+Creeps and projectiles use pre-allocated object pools managed by their respective systems. `IPoolable` interface provides consistent `OnPoolGet()` / `OnPoolReturn()` lifecycle. Pools `Clear()` and rebuild on game reset — no residual allocations.
+
+#### Folder Organization
+
+```
+Assets/Scripts/
+├── Core/               # GameBootstrap, GameStateMachine, GameState, GameTrigger, IGameState, IGameSystem, states
+├── Base/               # BaseComponent
+├── Creeps/             # (Story 2+) SpawnPointComponent, SpawnSystem, MovementSystem
+├── Turrets/            # (Story 4+) TurretComponent, PlacementSystem, TargetingSystem
+├── Combat/             # (Story 5+) ProjectileSystem, DamageSystem
+├── Economy/            # (Story 6+) EconomySystem
+├── Waves/              # (Story 9) WaveSystem
+├── Data/               # ScriptableObject definitions (CreepDef, TurretDef, WaveDef, EconomyConfig)
+└── UI/                 # UI Toolkit binding, HUD controller
+```
+
+No project-wide namespace. Feature folders group related components, systems, and data.
+
+#### Extension Points
+
+- **New creep/turret variant** (same behavior, different stats): Add ScriptableObject definition asset → Addressables picks it up → existing systems process it. Data-only change.
+- **New creep/turret behavior** (e.g., a novel turret effect): Requires a new effect handler in the relevant system(s). Scope depends on how different the behavior is from existing types.
+- **New game state**: Implement `IGameState` → add to `GameState` enum → register with `GameStateMachine` → add transition rows in `GameBootstrap`.
+- **New trigger**: Add to `GameTrigger` enum → add transition rows in `GameBootstrap`. Existing states unchanged.
+- **New gameplay system**: Implement `IGameSystem` → add to `PlayingState` system array in `GameBootstrap` at the correct tick position.
 
 ---
 
