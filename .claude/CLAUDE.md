@@ -141,6 +141,19 @@ Each deliverable must include:
 - Use `[UnityTest]` for Play Mode coroutine-based tests
 - Use `[Test]` for synchronous Edit Mode tests
 
+### Plan Review Checklist
+
+Before presenting a plan for user approval, perform a critical self-review checking:
+- **Single-writer discipline**: Every new data field has exactly one system that writes it. No hidden cross-mutation.
+- **Store data ownership**: New fields are documented with writer and readers. Matches the ownership table pattern in TDD.md.
+- **Frame-ordering correctness**: The plan accounts for system tick order (Phase 1 → 2 → 3) and deferred removal contract (MarkForRemoval → BeginFrame flushes → next frame). No assumptions about same-frame visibility of deferred operations.
+- **Double-action risks**: Deferred removal timing, re-entrance, or multi-tick entity survival could cause double-processing. Identify and guard against these (e.g., one-shot flags like HasDealtBaseDamage).
+- **Event handler discipline**: No event handlers fire game triggers or mutate state they don't own. Handlers buffer locally; owning system applies during its Tick().
+- **Simulation/presentation separation**: No gameplay logic depends on visual state. Systems operate on store data, not on Transforms or GameObjects.
+- **Test plan completeness**: Every AC has at least one test. Edge cases identified. Integration tests cover cross-system interactions.
+- **Constructor/dependency wiring**: All new dependencies are threaded through constructors. No runtime lookups for pure C# objects. GameBootstrap changes are explicit.
+- **Consistency with TDD.md**: Plan aligns with documented architecture. New patterns are justified, not accidental divergence.
+
 ### Deliverable Sign-Off Checklist
 
 Before a deliverable is considered complete:
