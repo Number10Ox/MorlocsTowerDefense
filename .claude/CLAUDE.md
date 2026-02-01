@@ -23,6 +23,15 @@ At the start of each session, check for and read the following files if they exi
 | Enums | PascalCase type and values | `enum CreepType { Small, Big }` |
 | Interfaces | I-prefix, PascalCase | `IDamageable`, `IPoolable` |
 
+### Method Naming by Intent
+
+Methods fall into two categories based on their intent:
+
+- **Builders** — Return an object or value. Named with a **noun** or **noun phrase** that describes what is produced. Must not change the state of the owning object. Examples: `NearestTarget(...)`, `ParsedConfig(...)`, `CreepAtPosition(...)`.
+- **Manipulators** — Perform an action that changes state. Named with a **verb** or **verb-noun phrase** describing the action. Generally return `void` or a status indicator (`bool`, enum), not the object being operated on. Examples: `ApplyDamage(...)`, `MarkForRemoval(...)`, `Reset()`, `Acquire(...)`.
+
+Avoid generic `Get`/`Set` prefixes. Exceptions: standard C# idioms (`TryGetValue` pattern), and trivial value-type property wrappers.
+
 ### Formatting
 
 - **Brace style**: Allman (opening brace on its own line)
@@ -47,12 +56,12 @@ At the start of each session, check for and read the following files if they exi
 
 ### Component Reference Patterns
 
-- **Avoid `GetComponent` in hot paths** — `GetComponent<T>()` is a runtime lookup. Never call it per-frame, in Update loops, or inside high-frequency iteration (pool Get/Return, per-creep ticks). Treat any `GetComponent` call in a loop as a performance bug.
+- **Avoid `GetComponent` in hot paths** — `GetComponent<T>()` is a runtime lookup. Never call it per-frame, in Update loops, or inside high-frequency iteration (pool Acquire/Return, per-creep ticks). Treat any `GetComponent` call in a loop as a performance bug.
 - **Prefer direct serialized references** — Drag-and-drop in the Inspector is the cheapest and most explicit way to wire dependencies: `[SerializeField] private CreepComponent creepComponent;`
 - **Cache once in Awake** — When a serialized reference isn't practical, call `GetComponent` once during `Awake`/`OnEnable` and store the result in a field. Never re-fetch what you already have.
 - **Use `TryGetComponent` for fallible lookups** — When the component may legitimately be absent, use `TryGetComponent` (avoids exceptions and is clearer intent than null-checking `GetComponent`).
 - **Enforce prefab contracts with `[RequireComponent]`** — If a MonoBehaviour always needs a sibling component, declare `[RequireComponent(typeof(T))]` on the class. This makes the dependency editor-enforced rather than runtime-enforced.
-- **Cache in pooling infrastructure** — Object pools that call `TryGetComponent` on Get/Return should cache the component reference per instance (e.g., in a `Dictionary<GameObject, IPoolable>`) to avoid repeated lookups across the object's pooled lifetime.
+- **Cache in pooling infrastructure** — Object pools that call `TryGetComponent` on Acquire/Return should cache the component reference per instance (e.g., in a `Dictionary<GameObject, IPoolable>`) to avoid repeated lookups across the object's pooled lifetime.
 - **Constructor injection for pure C# objects** — Systems, adapters, and other non-MonoBehaviour classes receive their dependencies through constructors, not through runtime lookups.
 
 ### Code Clarity

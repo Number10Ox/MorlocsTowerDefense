@@ -268,12 +268,10 @@ flowchart TD
         (Story 4)"]
     end
     subgraph phase2 ["Phase 2 — Combat"]
-        E --> F["TargetingSystem.Tick()
-        (Story 5)"]
-        F --> G["ProjectileSystem.Tick()
+        E --> G["ProjectileSystem.Tick()
         (Story 5)"]
         G --> H["DamageSystem.Tick()
-        (Story 3)"]
+        (Story 3+5)"]
     end
     subgraph phase3 ["Phase 3 — Resolution"]
         H --> I["EconomySystem.Tick()
@@ -290,7 +288,7 @@ flowchart TD
 | Phase | Systems | Purpose |
 |-------|---------|---------|
 | **1 — World Update** | Wave, Spawn, Movement, Placement | Bring all entities to current-frame state; process player input |
-| **2 — Combat** | Targeting, Projectile, Damage | Resolve attacks using positions settled in Phase 1 |
+| **2 — Combat** | Projectile, Damage | Resolve attacks using positions settled in Phase 1 |
 | **3 — Resolution** | Economy, End Conditions | Process rewards and check win/lose after combat settles |
 
 **Tick order within phases:**
@@ -298,9 +296,8 @@ flowchart TD
 2. **Spawn** creates new creeps from wave data
 3. **Movement** advances all creeps toward the base
 4. **Placement** processes player turret placement input — placed turrets are available for targeting this frame
-5. **Targeting** assigns turret targets using settled positions from Phase 1
-6. **Projectiles** advance in-flight projectiles, check hits
-7. **Damage** applies damage from hits, removes dead creeps, triggers base damage on arrival
+5. **Projectiles** fires new projectiles (inline target selection: nearest alive creep in range), advances in-flight projectiles, checks hits, records hits via `ProjectileStore.RecordHit()`
+6. **Damage** applies projectile hit damage to creeps, removes dead creeps (`OnCreepKilled`), applies base damage on arrival (dead-creep guard skips killed creeps)
 8. **Economy** processes coin awards from kills
 9. **Conditions** check win/lose after all systems have settled
 
@@ -340,14 +337,21 @@ Assets/
 │   ├── Data/                   # ScriptableObject definitions
 │   │   ├── CreepDef.cs
 │   │   ├── SpawnConfig.cs
-│   │   └── BaseConfig.cs
+│   │   ├── BaseConfig.cs
+│   │   └── TurretDef.cs
 │   ├── Turrets/                # Turret store, sim data, placement system, input, component
 │   │   ├── TurretStore.cs
 │   │   ├── TurretSimData.cs
 │   │   ├── PlacementSystem.cs
 │   │   ├── PlacementInput.cs
 │   │   └── TurretComponent.cs
-│   ├── Combat/                 # DamageSystem (Story 3+)
+│   ├── Combat/                 # DamageSystem, ProjectileSystem, ProjectileStore
+│   │   ├── DamageSystem.cs
+│   │   ├── ProjectileSystem.cs
+│   │   ├── ProjectileStore.cs
+│   │   ├── ProjectileSimData.cs
+│   │   ├── ProjectileHit.cs
+│   │   └── ProjectileComponent.cs
 │   ├── Economy/                # (Story 6+)
 │   ├── Waves/                  # (Story 9)
 │   └── UI/                     # BaseHealthHud (Story 3+)
@@ -369,7 +373,10 @@ Assets/
 │   │   ├── BaseHealthIntegrationTests.cs
 │   │   ├── TurretStoreTests.cs
 │   │   ├── PlacementSystemTests.cs
-│   │   └── TurretPlacementIntegrationTests.cs
+│   │   ├── TurretPlacementIntegrationTests.cs
+│   │   ├── ProjectileStoreTests.cs
+│   │   ├── ProjectileSystemTests.cs
+│   │   └── TurretShootingIntegrationTests.cs
 │   └── Runtime/
 │       └── RuntimeTests.asmdef
 ├── Prefabs/                    # (provided, unchanged)
@@ -449,7 +456,7 @@ classDiagram
     class GameObjectPool {
         <<ObjectPooling>>
         -Stack~GameObject~ available
-        +Get(Vector3 position) GameObject
+        +Acquire(Vector3 position) GameObject
         +Return(GameObject)
         +Clear()
     }
@@ -477,7 +484,7 @@ classDiagram
 - `SpawnSystem` and `MovementSystem` depend only on `CreepStore`, never on each other. No system-to-system coupling.
 - `CreepStore` manages deferred removals: `MarkForRemoval()` buffers IDs, `BeginFrame()` flushes them and populates `RemovedIdsThisFrame`.
 - `PresentationAdapter` reads `SpawnedThisFrame` and `RemovedIdsThisFrame` to efficiently manage the object pool — no O(n^2) diffing.
-- `GameObjectPool.Get(position)` sets transform position before activation to avoid one-frame visual pop at origin.
+- `GameObjectPool.Acquire(position)` sets transform position before activation to avoid one-frame visual pop at origin.
 
 ### Creep Lifecycle Sequence
 
@@ -506,7 +513,7 @@ sequenceDiagram
 
     Bootstrap->>Pres: SyncVisuals()
     Pres->>Store: Read SpawnedThisFrame
-    Pres->>Pool: Get(position)
+    Pres->>Pool: Acquire(position)
     Note over Pres: Creates GO‚ maps to creep ID
 
     Pres->>Store: Read ActiveCreeps
@@ -773,7 +780,7 @@ sequenceDiagram
 
     Bootstrap->>Pres: SyncVisuals()
     Pres->>TStore: Read PlacedThisFrame
-    Pres->>Pool: Get(position)
+    Pres->>Pool: Acquire(position)
     Note over Pres: Creates GO‚ maps to turret ID
 
     Note over Unity: Frame N+1 — no click
@@ -792,3 +799,204 @@ sequenceDiagram
     Bootstrap->>Pres: SyncVisuals()
     Note over Pres: No new turrets to spawn‚ existing turret GO persists
 ```
+
+---
+
+## Story 5 — Turret Shooting & Creep Damage
+
+### Class Diagram
+
+```mermaid
+classDiagram
+    class ProjectileStore {
+        -List~ProjectileSimData~ activeProjectiles
+        -HashSet~int~ pendingRemovals
+        -List~ProjectileSimData~ spawnedThisFrame
+        -List~int~ removedIdsThisFrame
+        -List~ProjectileHit~ hitsThisFrame
+        +IReadOnlyList~ProjectileSimData~ ActiveProjectiles
+        +IReadOnlyList~ProjectileSimData~ SpawnedThisFrame
+        +IReadOnlyList~int~ RemovedIdsThisFrame
+        +IReadOnlyList~ProjectileHit~ HitsThisFrame
+        +Add(ProjectileSimData)
+        +MarkForRemoval(int)
+        +RecordHit(ProjectileHit)
+        +BeginFrame()
+        +Reset()
+    }
+
+    class ProjectileSimData {
+        +int Id
+        +Vector3 Position
+        +int TargetCreepId
+        +int Damage
+        +float Speed
+    }
+
+    class ProjectileHit {
+        <<struct>>
+        +int TargetCreepId
+        +int Damage
+    }
+
+    class ProjectileSystem {
+        -TurretStore turretStore
+        -CreepStore creepStore
+        -ProjectileStore projectileStore
+        -int nextProjectileId
+        +Tick(float deltaTime)
+        +Reset()
+        -UpdateFireTimers(float)
+        -FindNearestCreepInRange(Vector3‚ float) int
+        -MoveProjectiles(float)
+    }
+
+    class DamageSystem {
+        -CreepStore creepStore
+        -BaseStore baseStore
+        -ProjectileStore projectileStore
+        +event Action~int~ OnCreepKilled
+        +Tick(float deltaTime)
+        -ProcessProjectileHits()
+        -ProcessBaseDamage()
+    }
+
+    class TurretDef {
+        <<ScriptableObject>>
+        -int damage
+        -float range
+        -float fireInterval
+        -float projectileSpeed
+        +int Damage
+        +float Range
+        +float FireInterval
+        +float ProjectileSpeed
+    }
+
+    class TurretSimData {
+        +int Id
+        +Vector3 Position
+        +float Range
+        +float FireInterval
+        +int Damage
+        +float ProjectileSpeed
+        +float FireCooldown
+    }
+
+    class CreepSimData {
+        +int Id
+        +Vector3 Position
+        +Vector3 Target
+        +float Speed
+        +bool ReachedBase
+        +int DamageToBase
+        +bool HasDealtBaseDamage
+        +int Health
+        +int MaxHealth
+    }
+
+    class ProjectileComponent {
+        <<MonoBehaviour>>
+        -int projectileId
+        +int ProjectileId
+        +Initialize(int)
+        +OnPoolGet()
+        +OnPoolReturn()
+    }
+
+    GameSession --> ProjectileStore : owns
+    ProjectileStore --> "0..*" ProjectileSimData : stores
+    ProjectileSystem --> TurretStore : reads ActiveTurrets
+    ProjectileSystem --> CreepStore : reads ActiveCreeps
+    ProjectileSystem --> ProjectileStore : writes via Add()‚ MarkForRemoval()‚ RecordHit()
+    ProjectileSystem ..|> IGameSystem
+    DamageSystem --> CreepStore : reads/writes Health
+    DamageSystem --> BaseStore : writes via ApplyDamage()
+    DamageSystem --> ProjectileStore : reads HitsThisFrame
+    DamageSystem ..|> IGameSystem
+    ProjectileComponent ..|> IPoolable
+    PresentationAdapter --> ProjectileStore : reads change lists
+    PresentationAdapter --> GameObjectPool : manages projectile GOs
+    GameBootstrap --> TurretDef : serialized ref
+```
+
+**Notes:**
+- `ProjectileSystem` handles three concerns internally: firing (with inline target selection), movement, and hit detection. No separate `TargetingSystem`.
+- Target selection is ephemeral — `FindNearestCreepInRange` scans creeps at fire time, skipping dead (`Health <= 0`) and arrived (`ReachedBase`) creeps.
+- `ProjectileStore.HitsThisFrame` bridges `ProjectileSystem` (writer) → `DamageSystem` (reader). DamageSystem remains the single writer for `CreepSimData.Health`.
+- `DamageSystem.OnCreepKilled` event provides a forward hook for Story 6 `EconomySystem`.
+- Dead-creep guards: `MovementSystem` skips `Health <= 0`, `DamageSystem.ProcessBaseDamage` skips `Health <= 0`.
+- `TurretSimData` gains combat fields (Range, FireInterval, Damage, ProjectileSpeed, FireCooldown) written once at placement by `PlacementSystem`, read each tick by `ProjectileSystem`.
+
+### Combat Sequence — Turret Fires, Projectile Hits, Creep Dies
+
+```mermaid
+sequenceDiagram
+    participant Bootstrap as GameBootstrap
+    participant Session as GameSession
+    participant CStore as CreepStore
+    participant TStore as TurretStore
+    participant PStore as ProjectileStore
+    participant ProjSys as ProjectileSystem
+    participant DmgSys as DamageSystem
+    participant Pres as PresentationAdapter
+    participant Pool as GameObjectPool
+
+    Note over Bootstrap: Frame N — turret fires
+
+    Bootstrap->>Session: BeginFrame()
+    Session->>CStore: BeginFrame()
+    Session->>TStore: BeginFrame()
+    Session->>PStore: BeginFrame()
+    Note over PStore: Clear frame lists‚ flush removals
+
+    Bootstrap->>ProjSys: Tick(dt)
+    Note over ProjSys: UpdateFireTimers: turret.FireCooldown -= dt
+    Note over ProjSys: Cooldown ≤ 0 → FindNearestCreepInRange
+    ProjSys->>PStore: Add(projectileSimData)
+    Note over PStore: Added to activeProjectiles + spawnedThisFrame
+
+    Note over ProjSys: MoveProjectiles: advance toward target
+    alt Within hit threshold or overshoot
+        ProjSys->>PStore: RecordHit(ProjectileHit)
+        ProjSys->>PStore: MarkForRemoval(projId)
+    end
+
+    Bootstrap->>DmgSys: Tick(dt)
+    Note over DmgSys: ProcessProjectileHits
+    DmgSys->>PStore: Read HitsThisFrame
+    DmgSys->>CStore: creep.Health -= hit.Damage
+    alt creep.Health <= 0
+        DmgSys->>CStore: MarkForRemoval(creepId)
+        DmgSys-->>DmgSys: OnCreepKilled?.Invoke(creepId)
+    end
+
+    Note over DmgSys: ProcessBaseDamage
+    Note over DmgSys: Skip creeps with Health ≤ 0
+
+    Bootstrap->>Pres: SyncVisuals()
+    Pres->>PStore: Read SpawnedThisFrame
+    Pres->>Pool: Acquire(position) — projectile GO
+    Pres->>PStore: Read ActiveProjectiles
+    Note over Pres: Update projectile Transform.position
+
+    Note over Bootstrap: Frame N+1 — removal flush
+
+    Bootstrap->>Session: BeginFrame()
+    Session->>CStore: BeginFrame()
+    Note over CStore: Flush creep removal → RemovedIdsThisFrame
+    Session->>PStore: BeginFrame()
+    Note over PStore: Flush projectile removal → RemovedIdsThisFrame
+
+    Bootstrap->>Pres: SyncVisuals()
+    Pres->>CStore: Read RemovedIdsThisFrame
+    Pres->>Pool: Return(creep GO)
+    Pres->>PStore: Read RemovedIdsThisFrame
+    Pres->>Pool: Return(projectile GO)
+```
+
+**Key timing:**
+- **Frame N**: `ProjectileSystem` fires projectile, moves it, detects hit. `DamageSystem` processes hit, reduces creep health, marks dead creep for removal.
+- **Frame N+1**: `BeginFrame()` flushes removals. `PresentationAdapter` returns creep and projectile GOs to their pools.
+- Fast projectiles (high speed, close range) may fire and hit in the same tick. Slow projectiles persist across multiple frames, homing toward the target.
+- If target is removed/dead before projectile impact, `MoveProjectiles` discards the projectile (marks for removal, no hit recorded).

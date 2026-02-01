@@ -26,10 +26,10 @@ public class GameObjectPoolTests
     }
 
     [Test]
-    public void Get_ReturnsGameObject()
+    public void Acquire_ReturnsGameObject()
     {
         var pool = new GameObjectPool(prefab, 1);
-        var instance = pool.Get(Vector3.zero);
+        var instance = pool.Acquire(Vector3.zero);
 
         Assert.IsNotNull(instance);
 
@@ -37,10 +37,10 @@ public class GameObjectPoolTests
     }
 
     [Test]
-    public void Get_ActivatesGameObject()
+    public void Acquire_ActivatesGameObject()
     {
         var pool = new GameObjectPool(prefab, 1);
-        var instance = pool.Get(Vector3.zero);
+        var instance = pool.Acquire(Vector3.zero);
 
         Assert.IsTrue(instance.activeSelf);
 
@@ -48,11 +48,11 @@ public class GameObjectPoolTests
     }
 
     [Test]
-    public void Get_SetsPositionBeforeActivation()
+    public void Acquire_SetsPositionBeforeActivation()
     {
         var pool = new GameObjectPool(prefab, 1);
         var position = new Vector3(5f, 10f, 15f);
-        var instance = pool.Get(position);
+        var instance = pool.Acquire(position);
 
         var poolable = instance.GetComponent<TestPoolable>();
         Assert.AreEqual(position, poolable.PositionAtOnPoolGet, "Position should be set before OnPoolGet callback");
@@ -65,7 +65,7 @@ public class GameObjectPoolTests
     public void Return_DeactivatesGameObject()
     {
         var pool = new GameObjectPool(prefab, 1);
-        var instance = pool.Get(Vector3.zero);
+        var instance = pool.Acquire(Vector3.zero);
 
         pool.Return(instance);
 
@@ -75,12 +75,12 @@ public class GameObjectPoolTests
     }
 
     [Test]
-    public void Get_AfterReturn_ReusesSameInstance()
+    public void Acquire_AfterReturn_ReusesSameInstance()
     {
         var pool = new GameObjectPool(prefab, 1);
-        var first = pool.Get(Vector3.zero);
+        var first = pool.Acquire(Vector3.zero);
         pool.Return(first);
-        var second = pool.Get(Vector3.zero);
+        var second = pool.Acquire(Vector3.zero);
 
         Assert.AreSame(first, second);
 
@@ -88,13 +88,13 @@ public class GameObjectPoolTests
     }
 
     [Test]
-    public void Get_PoolExhausted_GrowsWithWarning()
+    public void Acquire_PoolExhausted_GrowsWithWarning()
     {
         var pool = new GameObjectPool(prefab, 1);
-        var first = pool.Get(Vector3.zero);
+        var first = pool.Acquire(Vector3.zero);
 
         LogAssert.Expect(LogType.Warning, new Regex(@"Pool exhausted"));
-        var second = pool.Get(Vector3.zero);
+        var second = pool.Acquire(Vector3.zero);
 
         Assert.IsNotNull(second);
 
@@ -111,7 +111,7 @@ public class GameObjectPoolTests
 
         // Pre-allocated instances should be destroyed; getting now requires new instantiation
         LogAssert.Expect(LogType.Warning, new Regex(@"Pool exhausted"));
-        var instance = pool.Get(Vector3.zero);
+        var instance = pool.Acquire(Vector3.zero);
         Assert.IsNotNull(instance);
 
         Object.DestroyImmediate(instance);

@@ -36,6 +36,11 @@ public class MovementSystem : IGameSystem
                 continue;
             }
 
+            if (creep.Health <= 0)
+            {
+                continue;
+            }
+
             Vector3 direction = creep.Target - creep.Position;
             float distSq = direction.sqrMagnitude;
 

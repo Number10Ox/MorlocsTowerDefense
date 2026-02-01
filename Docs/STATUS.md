@@ -21,7 +21,7 @@
 | Story 2: Creep Spawning & Movement | Complete | CreepStore, SpawnSystem, MovementSystem, object pooling, PresentationAdapter sync |
 | Story 3: Base Health & Lose Condition | Complete | BaseStore, DamageSystem, LoseState, BaseConfig SO, BaseHealthHud (UI Toolkit), health HUD event-driven |
 | Story 4: Turret Placement | Complete | TurretStore (minimal, no removal pipeline), PlacementSystem, PlacementInput bridge, TurretComponent, PresentationAdapter input collection (raycast) + turret visual sync, turret pool |
-| Story 5: Turret Shooting & Creep Damage | Not started | |
+| Story 5: Turret Shooting & Creep Damage | Complete | ProjectileSystem (inline targeting), DamageSystem extended with projectile hits + OnCreepKilled, homing projectiles, dead-creep guards, TurretDef SO, ProjectileStore |
 | Story 6: Economy System | Not started | |
 | Story 7: Turret Types (Regular & Freezing) | Not started | |
 | Story 8: Creep Variety | Not started | |
@@ -51,6 +51,14 @@
 - **PlacementInput as shared bridge**: `PlacementInput` class created by `GameBootstrap` and passed to both `PresentationAdapter` (writer in `CollectInput`) and `PlacementSystem` (reader in `Tick`). Neither depends on the other. Consume-and-clear pattern: `PlacementSystem` clears input after consuming to prevent double-placement.
 - **TurretStore minimal for Story 4**: No removal pipeline (`MarkForRemoval`, `RemovedIdsThisFrame`). Only `ActiveTurrets`, `PlacedThisFrame`, `BeginFrame` (clears placed list), `Reset`. Removal deferred to a story that needs turret destruction/selling.
 - **Terrain raycast via LayerMask**: `GameBootstrap` exposes `LayerMask terrainLayerMask` serialized field, passed to `PresentationAdapter`. `CollectInput()` raycasts against this layer using Input System (`Mouse.current`).
+- **No TargetingSystem**: Target selection merged into `ProjectileSystem` at fire time. Eliminates a whole system class and cross-system coupling field (`TargetCreepId` on turret). Targeting is ephemeral — nearest alive creep in range is found at the moment of firing.
+- **Homing projectiles**: Projectiles track their target's current position each frame. If target dies or is removed before impact, projectile is discarded. Hit = distance < threshold or overshoot.
+- **Hit recording via store**: `ProjectileStore.HitsThisFrame` (list of `ProjectileHit` structs) bridges `ProjectileSystem` → `DamageSystem`. DamageSystem remains the single writer for creep health.
+- **Dead-creep guards**: `MovementSystem` and `DamageSystem.ProcessBaseDamage` skip creeps with `Health <= 0`. Prevents dead creeps from moving or dealing base damage after being killed by projectiles.
+- **OnCreepKilled event**: `DamageSystem` fires `event Action<int>` on creep death. Forward hook for Story 6 EconomySystem.
+- **FireInterval naming**: Consistent use of `FireInterval` (seconds between shots) across all code and data. No `FireRate`.
+- **TurretDef SO**: ScriptableObject for turret stats (damage, range, fireInterval, projectileSpeed). Systems receive primitives at bootstrap, never SO references.
+- **ProjectileStore with deferred removal**: Mirrors CreepStore pattern — `Add`, `MarkForRemoval`, `BeginFrame` (flush + clear frame lists). Plus `HitsThisFrame` for cross-system hit communication.
 
 ## Open Questions
 

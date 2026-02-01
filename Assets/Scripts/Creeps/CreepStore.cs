@@ -36,6 +36,22 @@ public class CreepStore
         pendingRemovals.Add(creepId);
     }
 
+    // Read-only lookup. Callers must not mutate fields they do not own.
+    public bool TryGetCreep(int creepId, out CreepSimData creep)
+    {
+        for (int i = 0; i < activeCreeps.Count; i++)
+        {
+            if (activeCreeps[i].Id == creepId)
+            {
+                creep = activeCreeps[i];
+                return true;
+            }
+        }
+
+        creep = null;
+        return false;
+    }
+
     public void Reset()
     {
         activeCreeps.Clear();

@@ -15,13 +15,15 @@ public class MovementSystemTests
         movement = new MovementSystem(store, THRESHOLD);
     }
 
-    private CreepSimData AddCreep(int id, Vector3 position, Vector3 target, float speed)
+    private CreepSimData AddCreep(int id, Vector3 position, Vector3 target, float speed, int health = 3)
     {
         var creep = new CreepSimData(id)
         {
             Position = position,
             Target = target,
-            Speed = speed
+            Speed = speed,
+            Health = health,
+            MaxHealth = health
         };
         store.Add(creep);
         return creep;

@@ -5,13 +5,16 @@ public class GameBootstrap : MonoBehaviour
 {
     private const int POOL_SIZE_MULTIPLIER = 10;
     private const int INITIAL_TURRET_POOL_SIZE = 20;
+    private const int INITIAL_PROJECTILE_POOL_SIZE = 50;
 
     [SerializeField] private HomeBaseComponent homeBase;
     [SerializeField] private SpawnPointComponent[] spawnPoints;
     [SerializeField] private GameObject creepPrefab;
     [SerializeField] private GameObject turretPrefab;
+    [SerializeField] private GameObject projectilePrefab;
     [SerializeField] private SpawnConfig spawnConfig;
     [SerializeField] private CreepDef creepDef;
+    [SerializeField] private TurretDef turretDef;
     [SerializeField] private BaseConfig baseConfig;
     [SerializeField] private LayerMask terrainLayerMask;
     [SerializeField] private GameObject losePopupPrefab;
@@ -47,6 +50,13 @@ public class GameBootstrap : MonoBehaviour
             return;
         }
 
+        if (projectilePrefab == null)
+        {
+            Debug.LogError("GameBootstrap: Projectile prefab reference is not assigned.");
+            enabled = false;
+            return;
+        }
+
         if (spawnConfig == null)
         {
             Debug.LogError("GameBootstrap: SpawnConfig reference is not assigned.");
@@ -57,6 +67,13 @@ public class GameBootstrap : MonoBehaviour
         if (creepDef == null)
         {
             Debug.LogError("GameBootstrap: CreepDef reference is not assigned.");
+            enabled = false;
+            return;
+        }
+
+        if (turretDef == null)
+        {
+            Debug.LogError("GameBootstrap: TurretDef reference is not assigned.");
             enabled = false;
             return;
         }
@@ -93,31 +110,50 @@ public class GameBootstrap : MonoBehaviour
             spawnConfig.SpawnInterval,
             spawnConfig.CreepsPerSpawn,
             creepDef.Speed,
-            creepDef.DamageToBase);
+            creepDef.DamageToBase,
+            creepDef.MaxHealth);
 
         var movementSystem = new MovementSystem(gameSession.CreepStore);
-        var damageSystem = new DamageSystem(gameSession.CreepStore, gameSession.BaseStore);
 
         var placementInput = new PlacementInput();
-        var placementSystem = new PlacementSystem(gameSession.TurretStore, placementInput);
+        var placementSystem = new PlacementSystem(
+            gameSession.TurretStore,
+            placementInput,
+            turretDef.Range,
+            turretDef.FireInterval,
+            turretDef.Damage,
+            turretDef.ProjectileSpeed);
+
+        var projectileSystem = new ProjectileSystem(
+            gameSession.TurretStore,
+            gameSession.CreepStore,
+            gameSession.ProjectileStore);
+
+        var damageSystem = new DamageSystem(
+            gameSession.CreepStore,
+            gameSession.BaseStore,
+            gameSession.ProjectileStore);
 
         int creepPoolSize = (spawnPositions.Length > 0 ? spawnPositions.Length : 1)
                             * spawnConfig.CreepsPerSpawn * POOL_SIZE_MULTIPLIER;
         var creepPool = new ObjectPooling.GameObjectPool(creepPrefab, creepPoolSize, transform);
         var turretPool = new ObjectPooling.GameObjectPool(turretPrefab, INITIAL_TURRET_POOL_SIZE, transform);
+        var projectilePool = new ObjectPooling.GameObjectPool(projectilePrefab, INITIAL_PROJECTILE_POOL_SIZE, transform);
 
         presentationAdapter = new PresentationAdapter(
             gameSession.CreepStore,
             creepPool,
             gameSession.TurretStore,
             turretPool,
+            gameSession.ProjectileStore,
+            projectilePool,
             placementInput,
             mainCamera,
             terrainLayerMask);
 
         systemScheduler = new SystemScheduler(new IGameSystem[]
         {
-            spawnSystem, movementSystem, placementSystem, damageSystem
+            spawnSystem, movementSystem, placementSystem, projectileSystem, damageSystem
         });
 
         stateMachine = new GameStateMachine();

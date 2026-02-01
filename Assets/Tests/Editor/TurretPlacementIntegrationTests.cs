@@ -12,7 +12,13 @@ public class TurretPlacementIntegrationTests
     {
         turretStore = new TurretStore();
         placementInput = new PlacementInput();
-        placementSystem = new PlacementSystem(turretStore, placementInput);
+        placementSystem = new PlacementSystem(
+            turretStore,
+            placementInput,
+            turretRange: 10f,
+            turretFireInterval: 1f,
+            turretDamage: 1,
+            turretProjectileSpeed: 15f);
     }
 
     [Test]
@@ -103,7 +109,13 @@ public class TurretPlacementIntegrationTests
     {
         var session = new GameSession(100);
         var input = new PlacementInput();
-        var system = new PlacementSystem(session.TurretStore, input);
+        var system = new PlacementSystem(
+            session.TurretStore,
+            input,
+            turretRange: 10f,
+            turretFireInterval: 1f,
+            turretDamage: 1,
+            turretProjectileSpeed: 15f);
 
         input.PlaceRequested = true;
         input.WorldPosition = Vector3.forward;

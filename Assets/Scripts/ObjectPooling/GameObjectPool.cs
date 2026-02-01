@@ -39,7 +39,7 @@ namespace ObjectPooling
             }
         }
 
-        public GameObject Get(Vector3 position)
+        public GameObject Acquire(Vector3 position)
         {
             GameObject instance;
             if (available.Count > 0)

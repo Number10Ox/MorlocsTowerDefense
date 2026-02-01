@@ -3,6 +3,11 @@ using UnityEngine;
 
 public class PlacementSystemTests
 {
+    private const float DEFAULT_RANGE = 10f;
+    private const float DEFAULT_FIRE_INTERVAL = 1f;
+    private const int DEFAULT_DAMAGE = 1;
+    private const float DEFAULT_PROJECTILE_SPEED = 15f;
+
     private TurretStore turretStore;
     private PlacementInput placementInput;
     private PlacementSystem system;
@@ -12,7 +17,13 @@ public class PlacementSystemTests
     {
         turretStore = new TurretStore();
         placementInput = new PlacementInput();
-        system = new PlacementSystem(turretStore, placementInput);
+        system = new PlacementSystem(
+            turretStore,
+            placementInput,
+            DEFAULT_RANGE,
+            DEFAULT_FIRE_INTERVAL,
+            DEFAULT_DAMAGE,
+            DEFAULT_PROJECTILE_SPEED);
     }
 
     [Test]

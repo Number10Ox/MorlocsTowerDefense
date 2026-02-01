@@ -31,10 +31,11 @@ public class BaseHealthIntegrationTests
             spawnInterval: SPAWN_INTERVAL,
             creepsPerSpawn: 1,
             creepSpeed: CREEP_SPEED,
-            damageToBase: DAMAGE_PER_CREEP);
+            damageToBase: DAMAGE_PER_CREEP,
+            maxHealth: 3);
 
         movementSystem = new MovementSystem(creepStore, arrivalThreshold: ARRIVAL_THRESHOLD);
-        damageSystem = new DamageSystem(creepStore, baseStore);
+        damageSystem = new DamageSystem(creepStore, baseStore, new ProjectileStore());
     }
 
     [Test]

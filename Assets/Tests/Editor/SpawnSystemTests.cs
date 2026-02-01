@@ -11,6 +11,7 @@ public class SpawnSystemTests
     private const float DEFAULT_INTERVAL = 1f;
     private const int DEFAULT_PER_SPAWN = 1;
     private const int DEFAULT_DAMAGE_TO_BASE = 1;
+    private const int DEFAULT_MAX_HEALTH = 3;
 
     [SetUp]
     public void SetUp()
@@ -25,7 +26,8 @@ public class SpawnSystemTests
         float interval = DEFAULT_INTERVAL,
         int perSpawn = DEFAULT_PER_SPAWN,
         float speed = DEFAULT_SPEED,
-        int damageToBase = DEFAULT_DAMAGE_TO_BASE)
+        int damageToBase = DEFAULT_DAMAGE_TO_BASE,
+        int maxHealth = DEFAULT_MAX_HEALTH)
     {
         return new SpawnSystem(
             store,
@@ -34,7 +36,8 @@ public class SpawnSystemTests
             interval,
             perSpawn,
             speed,
-            damageToBase);
+            damageToBase,
+            maxHealth);
     }
 
     [Test]
@@ -202,5 +205,18 @@ public class SpawnSystemTests
 
         Assert.AreEqual(5, store.ActiveCreeps[0].DamageToBase);
         Assert.AreEqual(5, store.ActiveCreeps[1].DamageToBase);
+    }
+
+    [Test]
+    public void Tick_IntervalElapsed_CreepsHaveCorrectHealth()
+    {
+        var system = MakeSystem(maxHealth: 5);
+
+        system.Tick(1.0f);
+
+        Assert.AreEqual(5, store.ActiveCreeps[0].Health);
+        Assert.AreEqual(5, store.ActiveCreeps[0].MaxHealth);
+        Assert.AreEqual(5, store.ActiveCreeps[1].Health);
+        Assert.AreEqual(5, store.ActiveCreeps[1].MaxHealth);
     }
 }

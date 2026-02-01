@@ -9,6 +9,8 @@ public sealed class CreepSimData
     public bool ReachedBase;
     public int DamageToBase;
     public bool HasDealtBaseDamage;
+    public int Health;
+    public int MaxHealth;
 
     public CreepSimData(int id)
     {
