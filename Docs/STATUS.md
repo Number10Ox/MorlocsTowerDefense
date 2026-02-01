@@ -47,7 +47,7 @@
 - **Per-frame damage tracking**: `BaseStore.DamageTakenThisFrame` justifies the `BeginFrame()` API and enables UI effects/test assertions.
 - **PlayingState polls for end conditions**: Event handler discipline forbids firing game triggers from event handlers. `PlayingState.Tick()` polls `baseStore.IsDestroyed` instead.
 - **HUD event-driven**: `BaseHealthHud` updates via `BaseStore.OnBaseHealthChanged` event (pure presentation, no mutation).
-- **LosePopup via bootstrap**: `GameBootstrap.OnStateChanged` toggles the provided UGUI LosePopup as a presentation concern.
+- **LosePopup via bootstrap**: `GameBootstrap.OnStateChanged` instantiates the LosePopup from a prefab reference on enter, destroys it on exit. Presentation concern only.
 
 ## Open Questions
 

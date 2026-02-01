@@ -104,7 +104,6 @@ public class GameBootstrap : MonoBehaviour
             baseHealthHud.UpdateHealth(baseConfig.MaxHealth, baseConfig.MaxHealth);
             gameSession.BaseStore.OnBaseHealthChanged += OnBaseHealthChanged;
         }
-
     }
 
     private void Start()

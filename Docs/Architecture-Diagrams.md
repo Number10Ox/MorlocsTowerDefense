@@ -165,7 +165,7 @@ sequenceDiagram
     Bootstrap->>SM: new GameStateMachine()
     Bootstrap->>Sched: new SystemScheduler(systems[])
     Bootstrap->>Init: new InitState(sm.Fire, homeBase)
-    Bootstrap->>Playing: new PlayingState(sm.Fire)
+    Bootstrap->>Playing: new PlayingState(sm.Fire, baseStore)
     Bootstrap->>SM: AddState(Init, initState)
     Bootstrap->>SM: AddState(Playing, playingState)
     Bootstrap->>SM: AddTransition(Init, SceneValidated, Playing)
@@ -273,7 +273,7 @@ flowchart TD
         F --> G["ProjectileSystem.Tick()
         (Story 5)"]
         G --> H["DamageSystem.Tick()
-        (Story 5)"]
+        (Story 3)"]
     end
     subgraph phase3 ["Phase 3 — Resolution"]
         H --> I["EconomySystem.Tick()
