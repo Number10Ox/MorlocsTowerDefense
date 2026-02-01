@@ -53,3 +53,4 @@
 
 - Addressables loading infrastructure (deferred until extensibility is needed, likely Story 8)
 - Remaining Data Configuration Strategy entries (turret defs, wave defs, economy config)
+- **Extract presentation concerns from GameBootstrap** — popup instantiation, HUD visibility toggling, and health event forwarding should move to a `PresentationController` or similar class. GameBootstrap should be startup wiring + Update pump only. Good time: when more presentation concerns arrive (turret placement UI, economy HUD).

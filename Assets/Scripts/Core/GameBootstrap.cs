@@ -11,7 +11,7 @@ public class GameBootstrap : MonoBehaviour
     [SerializeField] private SpawnConfig spawnConfig;
     [SerializeField] private CreepDef creepDef;
     [SerializeField] private BaseConfig baseConfig;
-    [SerializeField] private GameObject losePopup;
+    [SerializeField] private GameObject losePopupPrefab;
     [SerializeField] private UIDocument hudDocument;
 
     private GameStateMachine stateMachine;
@@ -19,6 +19,7 @@ public class GameBootstrap : MonoBehaviour
     private PresentationAdapter presentationAdapter;
     private GameSession gameSession;
     private BaseHealthHud baseHealthHud;
+    private GameObject losePopupInstance;
 
     private void Awake()
     {
@@ -104,10 +105,6 @@ public class GameBootstrap : MonoBehaviour
             gameSession.BaseStore.OnBaseHealthChanged += OnBaseHealthChanged;
         }
 
-        if (losePopup != null)
-        {
-            losePopup.SetActive(false);
-        }
     }
 
     private void Start()
@@ -144,20 +141,27 @@ public class GameBootstrap : MonoBehaviour
         {
             gameSession.BaseStore.OnBaseHealthChanged -= OnBaseHealthChanged;
         }
+
+        if (losePopupInstance != null)
+        {
+            Destroy(losePopupInstance);
+            losePopupInstance = null;
+        }
     }
 
     private void OnStateChanged(GameState from, GameState to)
     {
         Debug.Log($"State changed: {from} -> {to}");
 
-        if (to == GameState.Lose && losePopup != null)
+        if (to == GameState.Lose && losePopupPrefab != null)
         {
-            losePopup.SetActive(true);
+            losePopupInstance = Instantiate(losePopupPrefab);
         }
 
-        if (from == GameState.Lose && losePopup != null)
+        if (from == GameState.Lose && losePopupInstance != null)
         {
-            losePopup.SetActive(false);
+            Destroy(losePopupInstance);
+            losePopupInstance = null;
         }
 
         if (baseHealthHud != null)

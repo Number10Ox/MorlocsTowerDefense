@@ -1,4 +1,5 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <Style src="BaseHealthHud.uss" />
     <ui:VisualElement name="health-container" class="health-container">
         <ui:Label name="health-label" text="100 / 100" class="health-label" />
         <ui:VisualElement name="health-bar-background" class="health-bar-background">
