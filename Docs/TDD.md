@@ -47,19 +47,22 @@ GameBootstrap.Update() → GameStateMachine.Tick() → GameSession.BeginFrame() 
 | Class | Type | Responsibility |
 |-------|------|---------------|
 | `GameBootstrap` | MonoBehaviour | Composition root. Creates GameSession, state machine, states, system scheduler, systems, and presentation adapter. Configures transition table. Drives game loop via `Update()`. Gates system ticking by current state. Calls `GameSession.BeginFrame()` before system tick. |
-| `GameSession` | Plain C# | Per-run session. Owns all stores (CreepStore, future: TurretStore, etc.). `BeginFrame()` flushes deferred store operations and clears per-frame change lists. `Reset()` resets all stores for game restart. Discarded and recreated on restart. |
+| `GameSession` | Plain C# | Per-run session. Owns all stores (CreepStore, BaseStore, future: TurretStore, etc.). `BeginFrame()` flushes deferred store operations and clears per-frame change lists. `Reset()` resets all stores for game restart. Discarded and recreated on restart. |
 | `GameStateMachine` | Plain C# | Owns state registry and transition table. Resolves triggers to transitions. Fires `OnStateChanged` event. Processes pending triggers at tick start. |
 | `GameState` | Enum | State identifiers: `Init`, `Playing`, `Win`, `Lose`. |
 | `GameTrigger` | Enum | Semantic transition triggers: `SceneValidated`, `BaseDestroyed`, `AllWavesCleared`, `RestartRequested`. |
 | `IGameState` | Interface | Contract for game states: `Enter()`, `Tick(float)`, `Exit()`. |
 | `InitState` | Plain C# : `IGameState` | Validates scene setup (Base, SpawnPoints). Fires `SceneValidated`. Future: async Addressable loading. |
-| `PlayingState` | Plain C# : `IGameState` | Manages gameplay flow. Fires `BaseDestroyed` / `AllWavesCleared` when conditions met. Does not own or tick systems. |
+| `PlayingState` | Plain C# : `IGameState` | Manages gameplay flow. Polls `BaseStore.IsDestroyed` in `Tick()` and fires `BaseDestroyed` once (guarded by `baseDestroyedFired` flag, reset on `Enter()`). Future: checks `AllWavesCleared`. Does not own or tick systems. |
+| `LoseState` | Plain C# : `IGameState` | Represents lose game state. Empty Enter/Tick/Exit — popup toggle handled by `GameBootstrap.OnStateChanged` as presentation. Future: `RestartRequested` trigger (Story 10). |
 | `SystemScheduler` | Plain C# | Owns the ordered `IGameSystem[]` array. Ticks systems sequentially. Owned by `GameBootstrap`, ticked when state machine is in gameplay states. |
 | `IGameSystem` | Interface | Contract for gameplay systems: `Tick(float)`. |
 | `CreepStore` | Plain C# | Authoritative owner of the creep collection. `Add()`, `MarkForRemoval()`, `BeginFrame()` (flush removals, clear frame lists). Exposes `ActiveCreeps`, `SpawnedThisFrame`, `RemovedIdsThisFrame`. |
 | `SpawnSystem` | Plain C# : `IGameSystem` | Spawn timer. Creates `CreepSimData` entries via `CreepStore.Add()`. Depends on `CreepStore`, not on other systems. |
-| `MovementSystem` | Plain C# : `IGameSystem` | Advances creep positions toward base. Detects arrival and calls `CreepStore.MarkForRemoval()`. Depends on `CreepStore`, not on other systems. |
-| `HomeBaseComponent` | MonoBehaviour | Thin component on Base GameObject. Identifies the base for system discovery. Future stories add health data. |
+| `MovementSystem` | Plain C# : `IGameSystem` | Advances creep positions toward base. Detects arrival, sets `ReachedBase = true`, and calls `CreepStore.MarkForRemoval()`. Depends on `CreepStore`, not on other systems. |
+| `DamageSystem` | Plain C# : `IGameSystem` | Applies damage to base when creeps arrive. Iterates `ActiveCreeps`, applies `BaseStore.ApplyDamage()` for each with `ReachedBase && !HasDealtBaseDamage`, sets `HasDealtBaseDamage = true`. Future (Story 5): also handles projectile damage to creeps. |
+| `BaseStore` | Plain C# | Authoritative owner of base health. `ApplyDamage(int)` — idempotent after destruction (no event, no state change). `BeginFrame()` clears `DamageTakenThisFrame`. `Reset()` restores to max health. Fires `OnBaseHealthChanged` event for UI. |
+| `HomeBaseComponent` | MonoBehaviour | Thin component on Base GameObject. Identifies the base for system discovery. |
 | `SpawnPointComponent` | MonoBehaviour | Thin component on SpawnPoint GameObjects. Identifies spawn positions for bootstrap discovery. |
 | `CreepComponent` | MonoBehaviour + `IPoolable` | Thin component on creep prefab instances. Holds `CreepId` for sim-to-GO mapping. Pool lifecycle: activate on get, deactivate on return. |
 | `PresentationAdapter` | Plain C# | Reads store change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`) to manage creep GameObjects via object pool. Updates `Transform.position` from sim data. |
@@ -158,14 +161,15 @@ Stores themselves provide lifecycle operations (`Add`, `MarkForRemoval`, `BeginF
 |-------------|-------|-----------|---------|
 | Active creep registry | CreepStore | SpawnSystem (Add), MovementSystem (MarkForRemoval) | TargetingSystem, DamageSystem, PresentationAdapter |
 | Creep positions | CreepStore (field: Position) | MovementSystem | TargetingSystem, DamageSystem, PresentationAdapter |
-| Creep arrival flag | CreepStore (field: ReachedBase) | MovementSystem | MovementSystem (skip check) |
+| Creep arrival flag | CreepStore (field: ReachedBase) | MovementSystem | MovementSystem (skip check), DamageSystem |
+| Creep base damage guard | CreepStore (field: HasDealtBaseDamage) | DamageSystem | DamageSystem |
 | Creep spawn queue | (Future: WaveStore) | WaveSystem | SpawnSystem |
 | Creep positions & velocity | CreepStore (field: Position) | MovementSystem | TargetingSystem, DamageSystem, PresentationAdapter |
 | Creep health | CreepStore (field: Health) | DamageSystem | EconomySystem, PresentationAdapter |
 | Turret placement & positions | (Future: TurretStore) | PlacementSystem | TargetingSystem, PresentationAdapter |
 | Turret target assignments | (Future: TurretStore) | TargetingSystem | ProjectileSystem |
 | Projectile positions & state | (Future: ProjectileStore) | ProjectileSystem | DamageSystem, PresentationAdapter |
-| Base health | (Future: BaseStore) | DamageSystem | PlayingState (end condition), PresentationAdapter |
+| Base health | BaseStore (field: CurrentHealth) | DamageSystem | PlayingState (end condition), BaseHealthHud |
 | Coin balance | (Future: EconomyStore) | EconomySystem | PlacementSystem (affordability), PresentationAdapter |
 | Wave progress | (Future: WaveStore) | WaveSystem | PlayingState (end condition), PresentationAdapter |
 | Player input (placement) | PresentationAdapter | - | PlacementSystem |
@@ -193,14 +197,14 @@ Creeps and projectiles use pre-allocated object pools managed by the `Presentati
 Assets/Scripts/
 ├── Core/               # GameBootstrap, GameSession, GameStateMachine, SystemScheduler, PresentationAdapter, states, enums, interfaces
 ├── ObjectPooling/      # IPoolable, GameObjectPool (namespaced: ObjectPooling)
-├── HomeBase/           # HomeBaseComponent
+├── HomeBase/           # HomeBaseComponent, BaseStore
 ├── Creeps/             # CreepStore, CreepSimData, SpawnSystem, MovementSystem, SpawnPointComponent, CreepComponent
 ├── Turrets/            # (Story 4+) TurretComponent, PlacementSystem, TargetingSystem
-├── Combat/             # (Story 5+) ProjectileSystem, DamageSystem
+├── Combat/             # DamageSystem (Story 3+), ProjectileSystem (Story 5+)
 ├── Economy/            # (Story 6+) EconomySystem
 ├── Waves/              # (Story 9) WaveSystem
 ├── Data/               # ScriptableObject definitions (CreepDef, SpawnConfig, TurretDef, WaveDef, EconomyConfig)
-└── UI/                 # UI Toolkit binding, HUD controller
+└── UI/                 # UI Toolkit binding — BaseHealthHud (Story 3+), HUD controller
 ```
 
 No project-wide namespace. Feature folders group related components, systems, stores, and data. Generic reusable infrastructure (`ObjectPooling`) gets its own namespace.
@@ -259,8 +263,9 @@ The spec emphasizes making gameplay values "easy to tweak and tune." All gamepla
 
 | SO Class | Fields | Purpose | Story |
 |----------|--------|---------|-------|
-| `CreepDef` | `float speed` | Per-creep-type stats. Future: `int maxHealth`, `int coinReward`. | 2 |
+| `CreepDef` | `float speed`, `int damageToBase` | Per-creep-type stats. Future: `int maxHealth`, `int coinReward`. | 2-3 |
 | `SpawnConfig` | `float spawnInterval`, `int creepsPerSpawn` | Spawn timing. Temporary driver until WaveSystem (Story 9) takes over. | 2 |
+| `BaseConfig` | `int maxHealth` | Base health tuning. | 3 |
 
 ### Planned ScriptableObjects (not yet implemented)
 

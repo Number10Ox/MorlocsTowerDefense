@@ -322,12 +322,14 @@ Assets/
 │   │   ├── IGameState.cs       # interface
 │   │   ├── IGameSystem.cs      # interface
 │   │   ├── InitState.cs
-│   │   └── PlayingState.cs
+│   │   ├── PlayingState.cs
+│   │   └── LoseState.cs
 │   ├── ObjectPooling/          # Reusable pool infrastructure (namespaced)
 │   │   ├── IPoolable.cs
 │   │   └── GameObjectPool.cs
-│   ├── HomeBase/               # Home base identification component
-│   │   └── HomeBaseComponent.cs
+│   ├── HomeBase/               # Home base component and store
+│   │   ├── HomeBaseComponent.cs
+│   │   └── BaseStore.cs
 │   ├── Creeps/                 # Creep store, sim data, systems, components
 │   │   ├── CreepStore.cs
 │   │   ├── CreepSimData.cs
@@ -337,12 +339,13 @@ Assets/
 │   │   └── CreepComponent.cs
 │   ├── Data/                   # ScriptableObject definitions
 │   │   ├── CreepDef.cs
-│   │   └── SpawnConfig.cs
+│   │   ├── SpawnConfig.cs
+│   │   └── BaseConfig.cs
 │   ├── Turrets/                # (Story 4+)
-│   ├── Combat/                 # (Story 5+)
+│   ├── Combat/                 # DamageSystem (Story 3+)
 │   ├── Economy/                # (Story 6+)
 │   ├── Waves/                  # (Story 9)
-│   └── UI/                     # UI Toolkit binding
+│   └── UI/                     # BaseHealthHud (Story 3+)
 ├── Tests/
 │   ├── Editor/
 │   │   ├── EditModeTests.asmdef
@@ -353,7 +356,12 @@ Assets/
 │   │   ├── SpawnSystemTests.cs
 │   │   ├── MovementSystemTests.cs
 │   │   ├── GameObjectPoolTests.cs
-│   │   └── CreepSpawningIntegrationTests.cs
+│   │   ├── CreepSpawningIntegrationTests.cs
+│   │   ├── BaseStoreTests.cs
+│   │   ├── DamageSystemTests.cs
+│   │   ├── PlayingStateTests.cs
+│   │   ├── LoseStateTests.cs
+│   │   └── BaseHealthIntegrationTests.cs
 │   └── Runtime/
 │       └── RuntimeTests.asmdef
 ├── Prefabs/                    # (provided, unchanged)
@@ -515,3 +523,147 @@ sequenceDiagram
     Pres->>Pool: Return(GO)
     Note over Pres: Returns GO to pool‚ removes from map
 ```
+
+---
+
+## Story 3 — Base Health & Lose Condition
+
+### Class Diagram
+
+```mermaid
+classDiagram
+    class BaseStore {
+        -int maxHealth
+        -int currentHealth
+        -int damageTakenThisFrame
+        +int MaxHealth
+        +int CurrentHealth
+        +bool IsDestroyed
+        +int DamageTakenThisFrame
+        +event Action~int‚ int~ OnBaseHealthChanged
+        +ApplyDamage(int amount)
+        +BeginFrame()
+        +Reset()
+    }
+
+    class DamageSystem {
+        -CreepStore creepStore
+        -BaseStore baseStore
+        +Tick(float deltaTime)
+    }
+
+    class LoseState {
+        -Action~GameTrigger~ fire
+        +Enter()
+        +Tick(float deltaTime)
+        +Exit()
+    }
+
+    class BaseConfig {
+        <<ScriptableObject>>
+        -int maxHealth
+        +int MaxHealth
+    }
+
+    class BaseHealthHud {
+        -Label healthLabel
+        -VisualElement healthBarFill
+        -VisualElement healthContainer
+        +UpdateHealth(int current‚ int max)
+        +SetVisible(bool visible)
+    }
+
+    class CreepSimData {
+        +int Id
+        +Vector3 Position
+        +Vector3 Target
+        +float Speed
+        +bool ReachedBase
+        +int DamageToBase
+        +bool HasDealtBaseDamage
+    }
+
+    GameSession --> BaseStore : owns
+    GameSession --> CreepStore : owns
+    DamageSystem --> CreepStore : reads ActiveCreeps
+    DamageSystem --> BaseStore : writes via ApplyDamage()
+    DamageSystem ..|> IGameSystem
+    LoseState ..|> IGameState
+    PlayingState --> BaseStore : reads IsDestroyed
+    BaseHealthHud ..> BaseStore : listens OnBaseHealthChanged
+    GameBootstrap --> BaseConfig : serialized ref
+    GameBootstrap --> BaseHealthHud : owns
+```
+
+**Notes:**
+- `DamageSystem` reads `CreepStore.ActiveCreeps` and writes `BaseStore` via `ApplyDamage()`. Gates on `ReachedBase && !HasDealtBaseDamage` to prevent double-damage.
+- `BaseStore` fires `OnBaseHealthChanged` for UI updates. `ApplyDamage` is idempotent after destruction (no event, no state change once health is 0).
+- `PlayingState` polls `BaseStore.IsDestroyed` in `Tick()` — not event-driven — because event handlers must not fire game triggers per the event handler discipline.
+- `LoseState` is empty; `GameBootstrap.OnStateChanged` toggles the LosePopup as a presentation concern.
+- `BaseHealthHud` is a plain C# class (not MonoBehaviour) that binds to a `UIDocument` and updates via `OnBaseHealthChanged` event.
+
+### Base Damage Sequence
+
+```mermaid
+sequenceDiagram
+    participant Bootstrap as GameBootstrap
+    participant Session as GameSession
+    participant CStore as CreepStore
+    participant BStore as BaseStore
+    participant Move as MovementSystem
+    participant Dmg as DamageSystem
+    participant SM as GameStateMachine
+    participant Playing as PlayingState
+    participant HUD as BaseHealthHud
+
+    Note over Bootstrap: Frame N — creep arrives at base
+
+    Bootstrap->>Session: BeginFrame()
+    Session->>CStore: BeginFrame()
+    Session->>BStore: BeginFrame()
+    Note over BStore: Clear DamageTakenThisFrame
+
+    Bootstrap->>SM: Tick(dt)
+    SM->>Playing: Tick(dt)
+    Note over Playing: baseStore.IsDestroyed? → false (last frame's state)
+
+    Bootstrap->>Move: Tick(dt)
+    Note over Move: Creep reaches base
+    Move-->>CStore: creep.ReachedBase = true
+    Move->>CStore: MarkForRemoval(id)
+
+    Bootstrap->>Dmg: Tick(dt)
+    Note over Dmg: ReachedBase && !HasDealtBaseDamage
+    Dmg->>BStore: ApplyDamage(creep.DamageToBase)
+    Dmg-->>CStore: creep.HasDealtBaseDamage = true
+    BStore-->>HUD: OnBaseHealthChanged(current‚ max)
+    HUD-->>HUD: UpdateHealth(current‚ max)
+
+    Note over Bootstrap: Frame N+1 — base destroyed check
+
+    Bootstrap->>Session: BeginFrame()
+    Session->>CStore: BeginFrame()
+    Note over CStore: Flush removal
+
+    Bootstrap->>SM: Tick(dt)
+    SM->>Playing: Tick(dt)
+    Note over Playing: baseStore.IsDestroyed? → true
+    Playing->>SM: Fire(BaseDestroyed)
+    Note over SM: Pending trigger set
+
+    Note over Bootstrap: Frame N+2 — transition to Lose
+
+    Bootstrap->>SM: Tick(dt)
+    Note over SM: Resolve (Playing‚ BaseDestroyed) → Lose
+    SM->>Playing: Exit()
+    SM->>SM: Switch to LoseState
+    SM-->>Bootstrap: OnStateChanged(Playing‚ Lose)
+    Note over Bootstrap: losePopup.SetActive(true)
+    Note over Bootstrap: baseHealthHud.SetVisible(false)
+```
+
+**Key timing:**
+- **Frame N**: MovementSystem sets `ReachedBase`, DamageSystem applies damage, HUD updates via event.
+- **Frame N+1**: `PlayingState.Tick()` detects `IsDestroyed`, fires `BaseDestroyed` (pending trigger).
+- **Frame N+2**: State machine resolves trigger, transitions to Lose, popup appears.
+- Systems do not tick in Lose state (gated by `CurrentStateId == Playing` in `GameBootstrap.Update()`).

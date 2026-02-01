@@ -11,6 +11,7 @@ public class SpawnSystem : IGameSystem
     private readonly float spawnInterval;
     private readonly int creepsPerSpawn;
     private readonly float creepSpeed;
+    private readonly int damageToBase;
 
     private float spawnTimer;
     private int nextCreepId;
@@ -21,7 +22,8 @@ public class SpawnSystem : IGameSystem
         Vector3 basePosition,
         float spawnInterval,
         int creepsPerSpawn,
-        float creepSpeed)
+        float creepSpeed,
+        int damageToBase)
     {
         this.creepStore = creepStore ?? throw new ArgumentNullException(nameof(creepStore));
         this.spawnPositions = spawnPositions ?? throw new ArgumentNullException(nameof(spawnPositions));
@@ -29,6 +31,7 @@ public class SpawnSystem : IGameSystem
         this.spawnInterval = spawnInterval;
         this.creepsPerSpawn = creepsPerSpawn;
         this.creepSpeed = creepSpeed;
+        this.damageToBase = damageToBase;
     }
 
     public void Tick(float deltaTime)
@@ -81,7 +84,8 @@ public class SpawnSystem : IGameSystem
                 {
                     Position = spawnPositions[s],
                     Target = basePosition,
-                    Speed = creepSpeed
+                    Speed = creepSpeed,
+                    DamageToBase = damageToBase
                 };
                 creepStore.Add(creep);
             }

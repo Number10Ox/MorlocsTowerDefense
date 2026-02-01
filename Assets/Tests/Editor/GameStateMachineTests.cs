@@ -312,7 +312,7 @@ public class GameStateMachineTests
         {
             var stateMachine = new GameStateMachine();
             var initState = new InitState(stateMachine.Fire, homeBase);
-            var playingState = new PlayingState(stateMachine.Fire);
+            var playingState = new PlayingState(stateMachine.Fire, new BaseStore(100));
 
             stateMachine.AddState(GameState.Init, initState);
             stateMachine.AddState(GameState.Playing, playingState);

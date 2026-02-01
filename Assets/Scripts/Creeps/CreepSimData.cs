@@ -7,6 +7,8 @@ public sealed class CreepSimData
     public Vector3 Target;
     public float Speed;
     public bool ReachedBase;
+    public int DamageToBase;
+    public bool HasDealtBaseDamage;
 
     public CreepSimData(int id)
     {

@@ -21,7 +21,8 @@ public class CreepSpawningIntegrationTests
             basePosition,
             spawnInterval: 1f,
             creepsPerSpawn: 1,
-            creepSpeed: 10f);
+            creepSpeed: 10f,
+            damageToBase: 1);
 
         movementSystem = new MovementSystem(store, arrivalThreshold: 0.5f);
     }
@@ -74,7 +75,8 @@ public class CreepSpawningIntegrationTests
             Vector3.zero,
             spawnInterval: 1f,
             creepsPerSpawn: 1,
-            creepSpeed: 10f);
+            creepSpeed: 10f,
+            damageToBase: 1);
         var twoPointMovement = new MovementSystem(twoPointStore, arrivalThreshold: 0.5f);
 
         // Frame 1: Spawn both creeps

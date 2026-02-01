@@ -10,6 +10,7 @@ public class SpawnSystemTests
     private const float DEFAULT_SPEED = 5f;
     private const float DEFAULT_INTERVAL = 1f;
     private const int DEFAULT_PER_SPAWN = 1;
+    private const int DEFAULT_DAMAGE_TO_BASE = 1;
 
     [SetUp]
     public void SetUp()
@@ -23,7 +24,8 @@ public class SpawnSystemTests
         Vector3[] spawnPositions = null,
         float interval = DEFAULT_INTERVAL,
         int perSpawn = DEFAULT_PER_SPAWN,
-        float speed = DEFAULT_SPEED)
+        float speed = DEFAULT_SPEED,
+        int damageToBase = DEFAULT_DAMAGE_TO_BASE)
     {
         return new SpawnSystem(
             store,
@@ -31,7 +33,8 @@ public class SpawnSystemTests
             basePosition,
             interval,
             perSpawn,
-            speed);
+            speed,
+            damageToBase);
     }
 
     [Test]
@@ -188,5 +191,16 @@ public class SpawnSystemTests
 
         // 5 bursts × 2 spawn points × 1 per spawn = 10
         Assert.AreEqual(10, store.ActiveCreeps.Count);
+    }
+
+    [Test]
+    public void Tick_IntervalElapsed_CreepsHaveCorrectDamageToBase()
+    {
+        var system = MakeSystem(damageToBase: 5);
+
+        system.Tick(1.0f);
+
+        Assert.AreEqual(5, store.ActiveCreeps[0].DamageToBase);
+        Assert.AreEqual(5, store.ActiveCreeps[1].DamageToBase);
     }
 }
