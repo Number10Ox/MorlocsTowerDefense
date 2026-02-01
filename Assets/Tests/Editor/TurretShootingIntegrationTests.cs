@@ -103,7 +103,7 @@ public class TurretShootingIntegrationTests
         AddCreep(0, new Vector3(0.3f, 0f, 0f), health: 2);
 
         int killCount = 0;
-        damageSystem.OnCreepKilled += _ => killCount++;
+        damageSystem.OnCreepKilled += (_, _) => killCount++;
 
         // First hit
         TickCombat(0.016f);
@@ -205,7 +205,7 @@ public class TurretShootingIntegrationTests
         AddCreep(0, new Vector3(1f, 0f, 0f), health: 1);
 
         int killedId = -1;
-        damageSystem.OnCreepKilled += id => killedId = id;
+        damageSystem.OnCreepKilled += (id, _) => killedId = id;
 
         // Phase 1: Movement (creep moves toward base at origin — already close)
         movementSystem.Tick(0.016f);
@@ -232,7 +232,7 @@ public class TurretShootingIntegrationTests
         AddCreep(0, new Vector3(0f, 0f, 0.3f), health: 1);
 
         int killCount = 0;
-        damageSystem.OnCreepKilled += _ => killCount++;
+        damageSystem.OnCreepKilled += (_, _) => killCount++;
 
         TickCombat(0.016f);
 

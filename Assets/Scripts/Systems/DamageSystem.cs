@@ -8,7 +8,7 @@ public class DamageSystem : IGameSystem
     private readonly BaseStore baseStore;
     private readonly ProjectileStore projectileStore;
 
-    public event Action<int> OnCreepKilled;
+    public event Action<int, int> OnCreepKilled;
 
     public DamageSystem(CreepStore creepStore, BaseStore baseStore, ProjectileStore projectileStore)
     {
@@ -38,7 +38,7 @@ public class DamageSystem : IGameSystem
             if (creep.Health <= 0)
             {
                 creepStore.MarkForRemoval(creep.Id);
-                OnCreepKilled?.Invoke(creep.Id);
+                OnCreepKilled?.Invoke(creep.Id, creep.CoinReward);
             }
         }
     }

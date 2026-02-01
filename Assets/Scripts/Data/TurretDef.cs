@@ -16,10 +16,14 @@ public class TurretDef : ScriptableObject
     [Tooltip("Projectile travel speed in units per second.")]
     [Min(0.1f)] [SerializeField] private float projectileSpeed = 15f;
 
+    [Tooltip("Coin cost to place this turret type.")]
+    [Min(0)] [SerializeField] private int cost = 5;
+
     public int Damage => damage;
     public float Range => range;
     public float FireInterval => fireInterval;
     public float ProjectileSpeed => projectileSpeed;
+    public int Cost => cost;
 
     private void OnValidate()
     {
@@ -27,5 +31,6 @@ public class TurretDef : ScriptableObject
         range = Mathf.Max(0.1f, range);
         fireInterval = Mathf.Max(0.01f, fireInterval);
         projectileSpeed = Mathf.Max(0.1f, projectileSpeed);
+        cost = Mathf.Max(0, cost);
     }
 }

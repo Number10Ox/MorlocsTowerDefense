@@ -21,13 +21,16 @@ public class SpawnSystemTests
         basePosition = Vector3.zero;
     }
 
+    private const int DEFAULT_COIN_REWARD = 1;
+
     private SpawnSystem MakeSystem(
         Vector3[] spawnPositions = null,
         float interval = DEFAULT_INTERVAL,
         int perSpawn = DEFAULT_PER_SPAWN,
         float speed = DEFAULT_SPEED,
         int damageToBase = DEFAULT_DAMAGE_TO_BASE,
-        int maxHealth = DEFAULT_MAX_HEALTH)
+        int maxHealth = DEFAULT_MAX_HEALTH,
+        int coinReward = DEFAULT_COIN_REWARD)
     {
         return new SpawnSystem(
             store,
@@ -37,7 +40,8 @@ public class SpawnSystemTests
             perSpawn,
             speed,
             damageToBase,
-            maxHealth);
+            maxHealth,
+            coinReward);
     }
 
     [Test]
@@ -218,5 +222,16 @@ public class SpawnSystemTests
         Assert.AreEqual(5, store.ActiveCreeps[0].MaxHealth);
         Assert.AreEqual(5, store.ActiveCreeps[1].Health);
         Assert.AreEqual(5, store.ActiveCreeps[1].MaxHealth);
+    }
+
+    [Test]
+    public void Tick_IntervalElapsed_CreepsHaveCorrectCoinReward()
+    {
+        var system = MakeSystem(coinReward: 3);
+
+        system.Tick(1.0f);
+
+        Assert.AreEqual(3, store.ActiveCreeps[0].CoinReward);
+        Assert.AreEqual(3, store.ActiveCreeps[1].CoinReward);
     }
 }

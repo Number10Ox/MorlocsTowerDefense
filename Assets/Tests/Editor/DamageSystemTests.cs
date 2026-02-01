@@ -285,7 +285,7 @@ public class DamageSystemTests
         projectileStore.RecordHit(new ProjectileHit(0, 1));
 
         int killedId = -1;
-        damageSystem.OnCreepKilled += id => killedId = id;
+        damageSystem.OnCreepKilled += (id, reward) => killedId = id;
 
         damageSystem.Tick(0.016f);
 
@@ -306,7 +306,7 @@ public class DamageSystemTests
         projectileStore.RecordHit(new ProjectileHit(0, 1));
 
         int killCount = 0;
-        damageSystem.OnCreepKilled += _ => killCount++;
+        damageSystem.OnCreepKilled += (_, _) => killCount++;
 
         damageSystem.Tick(0.016f);
 
@@ -353,12 +353,33 @@ public class DamageSystemTests
         projectileStore.RecordHit(new ProjectileHit(0, 3));
 
         int killCount = 0;
-        damageSystem.OnCreepKilled += _ => killCount++;
+        damageSystem.OnCreepKilled += (_, _) => killCount++;
 
         damageSystem.Tick(0.016f);
 
         Assert.AreEqual(0, creep.Health);
         Assert.AreEqual(1, killCount);
+    }
+
+    [Test]
+    public void Tick_ProjectileHit_CreepDies_FiresOnCreepKilledWithReward()
+    {
+        var creep = new CreepSimData(0)
+        {
+            Position = Vector3.zero,
+            Health = 1,
+            MaxHealth = 1,
+            CoinReward = 3
+        };
+        creepStore.Add(creep);
+        projectileStore.RecordHit(new ProjectileHit(0, 1));
+
+        int capturedReward = -1;
+        damageSystem.OnCreepKilled += (id, reward) => capturedReward = reward;
+
+        damageSystem.Tick(0.016f);
+
+        Assert.AreEqual(3, capturedReward);
     }
 
     [Test]

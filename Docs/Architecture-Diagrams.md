@@ -331,7 +331,8 @@ Assets/
 │   │   ├── CreepStore.cs
 │   │   ├── BaseStore.cs
 │   │   ├── TurretStore.cs
-│   │   └── ProjectileStore.cs
+│   │   ├── ProjectileStore.cs
+│   │   └── EconomyStore.cs
 │   ├── SimData/                  # Pure simulation data classes/structs
 │   │   ├── CreepSimData.cs
 │   │   ├── TurretSimData.cs
@@ -342,7 +343,8 @@ Assets/
 │   │   ├── MovementSystem.cs
 │   │   ├── PlacementSystem.cs
 │   │   ├── ProjectileSystem.cs
-│   │   └── DamageSystem.cs
+│   │   ├── DamageSystem.cs
+│   │   └── EconomySystem.cs
 │   ├── Components/               # Thin MonoBehaviour prefab hooks
 │   │   ├── HomeBaseComponent.cs
 │   │   ├── SpawnPointComponent.cs
@@ -355,6 +357,7 @@ Assets/
 │   │   ├── PresentationAdapter.cs
 │   │   ├── GameUiCoordinator.cs
 │   │   ├── BaseHealthHud.cs
+│   │   ├── CoinHud.cs
 │   │   ├── BaseHealthHud.uss
 │   │   ├── BaseHealthHud.uxml
 │   │   └── DefaultPanel Settings.asset
@@ -362,8 +365,8 @@ Assets/
 │   │   ├── CreepDef.cs
 │   │   ├── SpawnConfig.cs
 │   │   ├── BaseConfig.cs
-│   │   └── TurretDef.cs
-│   ├── Economy/                  # (Story 6+)
+│   │   ├── TurretDef.cs
+│   │   └── EconomyConfig.cs
 │   └── Waves/                    # (Story 9)
 ├── Tests/
 │   ├── Editor/
@@ -387,7 +390,10 @@ Assets/
 │   │   ├── ProjectileStoreTests.cs
 │   │   ├── ProjectileSystemTests.cs
 │   │   ├── TurretShootingIntegrationTests.cs
-│   │   └── GameUiCoordinatorTests.cs
+│   │   ├── GameUiCoordinatorTests.cs
+│   │   ├── EconomyStoreTests.cs
+│   │   ├── EconomySystemTests.cs
+│   │   └── EconomyIntegrationTests.cs
 │   └── Runtime/
 │       └── RuntimeTests.asmdef
 ├── Prefabs/
@@ -867,7 +873,7 @@ classDiagram
         -CreepStore creepStore
         -BaseStore baseStore
         -ProjectileStore projectileStore
-        +event Action~int~ OnCreepKilled
+        +event Action~int‚ int~ OnCreepKilled
         +Tick(float deltaTime)
         -ProcessProjectileHits()
         -ProcessBaseDamage()
@@ -936,7 +942,7 @@ classDiagram
 - `ProjectileSystem` handles three concerns internally: firing (with inline target selection), movement, and hit detection. No separate `TargetingSystem`.
 - Target selection is ephemeral — `FindNearestCreepInRange` scans creeps at fire time, skipping dead (`Health <= 0`) and arrived (`ReachedBase`) creeps.
 - `ProjectileStore.HitsThisFrame` bridges `ProjectileSystem` (writer) → `DamageSystem` (reader). DamageSystem remains the single writer for `CreepSimData.Health`.
-- `DamageSystem.OnCreepKilled` event provides a forward hook for Story 6 `EconomySystem`.
+- `DamageSystem.OnCreepKilled(creepId, coinReward)` event passes the reward directly. `EconomySystem` subscribes and buffers credits.
 - Dead-creep guards: `MovementSystem` skips `Health <= 0`, `DamageSystem.ProcessBaseDamage` skips `Health <= 0`.
 - `TurretSimData` gains combat fields (Range, FireInterval, Damage, ProjectileSpeed, FireCooldown) written once at placement by `PlacementSystem`, read each tick by `ProjectileSystem`.
 
@@ -980,7 +986,7 @@ sequenceDiagram
     DmgSys->>CStore: creep.Health -= hit.Damage
     alt creep.Health <= 0
         DmgSys->>CStore: MarkForRemoval(creepId)
-        DmgSys-->>DmgSys: OnCreepKilled?.Invoke(creepId)
+        DmgSys-->>DmgSys: OnCreepKilled?.Invoke(creepId‚ coinReward)
     end
 
     Note over DmgSys: ProcessBaseDamage
@@ -1012,3 +1018,133 @@ sequenceDiagram
 - **Frame N+1**: `BeginFrame()` flushes removals. `PresentationAdapter` returns creep and projectile GOs to their pools.
 - Fast projectiles (high speed, close range) may fire and hit in the same tick. Slow projectiles persist across multiple frames, homing toward the target.
 - If target is removed/dead before projectile impact, `MoveProjectiles` discards the projectile (marks for removal, no hit recorded).
+
+---
+
+## Story 6 — Economy System
+
+### Class Diagram
+
+```mermaid
+classDiagram
+    class EconomyStore {
+        -int startingCoins
+        -int currentCoins
+        -int coinsEarnedThisFrame
+        -int coinsSpentThisFrame
+        +int CurrentCoins
+        +int CoinsEarnedThisFrame
+        +int CoinsSpentThisFrame
+        +event Action~int~ OnCoinsChanged
+        +AddCoins(int amount)
+        +TrySpendCoins(int amount) bool
+        +CanAfford(int cost) bool
+        +BeginFrame()
+        +Reset()
+    }
+
+    class EconomySystem {
+        -EconomyStore economyStore
+        -TurretStore turretStore
+        -int turretCost
+        -int pendingCoinCredits
+        +HandleCreepKilled(int creepId‚ int coinReward)
+        +Tick(float deltaTime)
+        +Reset()
+    }
+
+    class EconomyConfig {
+        <<ScriptableObject>>
+        -int startingCoins
+        +int StartingCoins
+    }
+
+    class CoinHud {
+        -Label coinLabel
+        -VisualElement coinContainer
+        +UpdateCoins(int amount)
+        +SetVisible(bool visible)
+    }
+
+    class DamageSystem {
+        +event Action~int‚ int~ OnCreepKilled
+    }
+
+    class PlacementSystem {
+        -EconomyStore economyStore
+        -int turretCost
+        +Tick(float deltaTime)
+    }
+
+    class CreepSimData {
+        +int CoinReward
+    }
+
+    GameSession --> EconomyStore : owns
+    EconomySystem --> EconomyStore : writes via AddCoins()‚ TrySpendCoins()
+    EconomySystem --> TurretStore : reads PlacedThisFrame
+    EconomySystem ..|> IGameSystem
+    PlacementSystem --> EconomyStore : reads via CanAfford()
+    DamageSystem ..> EconomySystem : OnCreepKilled(id‚ reward)
+    GameUiCoordinator --> CoinHud : optional
+    GameUiCoordinator --> EconomyStore : listens OnCoinsChanged
+    GameFlowController --> EconomyConfig : serialized ref
+```
+
+**Notes:**
+- `EconomySystem` is the single writer for `EconomyStore`. `PlacementSystem` only reads via `CanAfford()`.
+- `DamageSystem.OnCreepKilled(int creepId, int coinReward)` passes the reward through the event. `EconomySystem.HandleCreepKilled` buffers credits locally; they are applied during `EconomySystem.Tick()` (handler discipline).
+- `PlacementSystem` gates placement on `EconomyStore.CanAfford(turretCost)`. Clears input on insufficient coins to prevent stale requests.
+- `CoinHud` is a stateless view that shares the same `UIDocument` as `BaseHealthHud`. `GameUiCoordinator` forwards `OnCoinsChanged` to `CoinHud.UpdateCoins`.
+- `EconomyConfig` is a ScriptableObject for `startingCoins` tuning. `GameFlowController` extracts the value at bootstrap.
+
+### Economy Sequence — Kill Reward + Turret Placement
+
+```mermaid
+sequenceDiagram
+    participant Bootstrap as GameFlowController
+    participant Session as GameSession
+    participant EStore as EconomyStore
+    participant DmgSys as DamageSystem
+    participant EcoSys as EconomySystem
+    participant TStore as TurretStore
+    participant PlaceSys as PlacementSystem
+    participant Input as PlacementInput
+    participant Coord as GameUiCoordinator
+    participant HUD as CoinHud
+
+    Note over Bootstrap: Frame N — creep killed + player places turret
+
+    Bootstrap->>Session: BeginFrame()
+    Session->>EStore: BeginFrame()
+    Note over EStore: Clear coinsEarnedThisFrame‚ coinsSpentThisFrame
+
+    Note over Bootstrap: Phase 1 — World Update
+    Bootstrap->>PlaceSys: Tick(dt)
+    PlaceSys->>EStore: CanAfford(turretCost)?
+    Note over PlaceSys: true → place turret
+    PlaceSys->>TStore: Add(turretSimData)
+    PlaceSys->>Input: Clear()
+
+    Note over Bootstrap: Phase 2 — Combat
+    Bootstrap->>DmgSys: Tick(dt)
+    Note over DmgSys: Creep killed
+    DmgSys-->>EcoSys: OnCreepKilled(creepId‚ coinReward)
+    Note over EcoSys: Buffer: pendingCoinCredits += coinReward
+
+    Note over Bootstrap: Phase 3 — Resolution
+    Bootstrap->>EcoSys: Tick(dt)
+    EcoSys->>EStore: AddCoins(pendingCoinCredits)
+    EStore-->>Coord: OnCoinsChanged(currentCoins)
+    Coord-->>HUD: UpdateCoins(currentCoins)
+    Note over EcoSys: Read TurretStore.PlacedThisFrame.Count
+    EcoSys->>EStore: TrySpendCoins(turretCost)
+    EStore-->>Coord: OnCoinsChanged(currentCoins)
+    Coord-->>HUD: UpdateCoins(currentCoins)
+```
+
+**Key timing:**
+- **Phase 1**: `PlacementSystem` checks `CanAfford()` before placing. Turret is added to `TurretStore.PlacedThisFrame`.
+- **Phase 2**: `DamageSystem` kills creep, fires `OnCreepKilled(id, reward)`. `EconomySystem` buffers credit locally.
+- **Phase 3**: `EconomySystem.Tick()` applies buffered credits first (coins go up), then deducts for each turret in `PlacedThisFrame` (coins go down). Net balance is correct.
+- Credits before debits ensures that if a creep kill and turret placement happen in the same frame, the kill reward is applied before the cost is deducted.

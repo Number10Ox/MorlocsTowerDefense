@@ -26,3 +26,16 @@
     background-color: rgb(50, 200, 50);
     border-radius: 3px;
 }
+
+.coin-container {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    padding: 5px;
+}
+
+.coin-label {
+    font-size: 18px;
+    color: rgb(255, 215, 0);
+    -unity-font-style: bold;
+}

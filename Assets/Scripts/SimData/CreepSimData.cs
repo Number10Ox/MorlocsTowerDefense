@@ -12,6 +12,7 @@ public sealed class CreepSimData
     public bool HasDealtBaseDamage;
     public int Health;
     public int MaxHealth;
+    public int CoinReward;
 
     public CreepSimData(int id)
     {

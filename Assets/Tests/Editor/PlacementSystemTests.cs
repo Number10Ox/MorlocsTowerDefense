@@ -7,9 +7,12 @@ public class PlacementSystemTests
     private const float DEFAULT_FIRE_INTERVAL = 1f;
     private const int DEFAULT_DAMAGE = 1;
     private const float DEFAULT_PROJECTILE_SPEED = 15f;
+    private const int DEFAULT_TURRET_COST = 5;
+    private const int HIGH_STARTING_COINS = 1000;
 
     private TurretStore turretStore;
     private PlacementInput placementInput;
+    private EconomyStore economyStore;
     private PlacementSystem system;
 
     [SetUp]
@@ -17,13 +20,16 @@ public class PlacementSystemTests
     {
         turretStore = new TurretStore();
         placementInput = new PlacementInput();
+        economyStore = new EconomyStore(HIGH_STARTING_COINS);
         system = new PlacementSystem(
             turretStore,
             placementInput,
+            economyStore,
             DEFAULT_RANGE,
             DEFAULT_FIRE_INTERVAL,
             DEFAULT_DAMAGE,
-            DEFAULT_PROJECTILE_SPEED);
+            DEFAULT_PROJECTILE_SPEED,
+            DEFAULT_TURRET_COST);
     }
 
     [Test]
@@ -111,5 +117,73 @@ public class PlacementSystemTests
         system.Tick(0.016f);
 
         Assert.AreEqual(0, turretStore.ActiveTurrets[1].Id);
+    }
+
+    // --- Affordability Gate ---
+
+    [Test]
+    public void Tick_InsufficientCoins_DoesNotPlaceTurret()
+    {
+        var poorStore = new EconomyStore(0);
+        var poorSystem = new PlacementSystem(
+            turretStore,
+            placementInput,
+            poorStore,
+            DEFAULT_RANGE,
+            DEFAULT_FIRE_INTERVAL,
+            DEFAULT_DAMAGE,
+            DEFAULT_PROJECTILE_SPEED,
+            DEFAULT_TURRET_COST);
+
+        placementInput.PlaceRequested = true;
+        placementInput.WorldPosition = Vector3.zero;
+
+        poorSystem.Tick(0.016f);
+
+        Assert.AreEqual(0, turretStore.ActiveTurrets.Count);
+    }
+
+    [Test]
+    public void Tick_InsufficientCoins_ClearsInput()
+    {
+        var poorStore = new EconomyStore(0);
+        var poorSystem = new PlacementSystem(
+            turretStore,
+            placementInput,
+            poorStore,
+            DEFAULT_RANGE,
+            DEFAULT_FIRE_INTERVAL,
+            DEFAULT_DAMAGE,
+            DEFAULT_PROJECTILE_SPEED,
+            DEFAULT_TURRET_COST);
+
+        placementInput.PlaceRequested = true;
+        placementInput.WorldPosition = Vector3.zero;
+
+        poorSystem.Tick(0.016f);
+
+        Assert.IsFalse(placementInput.PlaceRequested);
+    }
+
+    [Test]
+    public void Tick_ExactCoins_PlacesTurret()
+    {
+        var exactStore = new EconomyStore(DEFAULT_TURRET_COST);
+        var exactSystem = new PlacementSystem(
+            turretStore,
+            placementInput,
+            exactStore,
+            DEFAULT_RANGE,
+            DEFAULT_FIRE_INTERVAL,
+            DEFAULT_DAMAGE,
+            DEFAULT_PROJECTILE_SPEED,
+            DEFAULT_TURRET_COST);
+
+        placementInput.PlaceRequested = true;
+        placementInput.WorldPosition = Vector3.zero;
+
+        exactSystem.Tick(0.016f);
+
+        Assert.AreEqual(1, turretStore.ActiveTurrets.Count);
     }
 }

@@ -6,4 +6,7 @@
             <ui:VisualElement name="health-bar-fill" class="health-bar-fill" />
         </ui:VisualElement>
     </ui:VisualElement>
+    <ui:VisualElement name="coin-container" class="coin-container">
+        <ui:Label name="coin-label" text="Coins: 0" class="coin-label" />
+    </ui:VisualElement>
 </ui:UXML>

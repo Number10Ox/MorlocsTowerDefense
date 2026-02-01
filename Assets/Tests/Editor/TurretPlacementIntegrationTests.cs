@@ -3,8 +3,12 @@ using UnityEngine;
 
 public class TurretPlacementIntegrationTests
 {
+    private const int HIGH_STARTING_COINS = 1000;
+    private const int DEFAULT_TURRET_COST = 5;
+
     private TurretStore turretStore;
     private PlacementInput placementInput;
+    private EconomyStore economyStore;
     private PlacementSystem placementSystem;
 
     [SetUp]
@@ -12,13 +16,16 @@ public class TurretPlacementIntegrationTests
     {
         turretStore = new TurretStore();
         placementInput = new PlacementInput();
+        economyStore = new EconomyStore(HIGH_STARTING_COINS);
         placementSystem = new PlacementSystem(
             turretStore,
             placementInput,
+            economyStore,
             turretRange: 10f,
             turretFireInterval: 1f,
             turretDamage: 1,
-            turretProjectileSpeed: 15f);
+            turretProjectileSpeed: 15f,
+            turretCost: DEFAULT_TURRET_COST);
     }
 
     [Test]
@@ -107,15 +114,17 @@ public class TurretPlacementIntegrationTests
     [Test]
     public void GameSessionBeginFrame_FlushesAllStores()
     {
-        var session = new GameSession(100);
+        var session = new GameSession(100, HIGH_STARTING_COINS);
         var input = new PlacementInput();
         var system = new PlacementSystem(
             session.TurretStore,
             input,
+            session.EconomyStore,
             turretRange: 10f,
             turretFireInterval: 1f,
             turretDamage: 1,
-            turretProjectileSpeed: 15f);
+            turretProjectileSpeed: 15f,
+            turretCost: DEFAULT_TURRET_COST);
 
         input.PlaceRequested = true;
         input.WorldPosition = Vector3.forward;

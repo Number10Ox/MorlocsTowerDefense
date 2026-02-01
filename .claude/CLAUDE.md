@@ -171,10 +171,12 @@ Before presenting a plan for user approval, perform a critical self-review check
 - **Event handler discipline**: No event handlers fire game triggers or mutate state they don't own. Handlers buffer locally; owning system applies during its Tick().
 - **Simulation/presentation separation**: No gameplay logic depends on visual state. Systems operate on store data, not on Transforms or GameObjects.
 - **Test plan completeness**: Every AC has at least one test. Edge cases identified. Integration tests cover cross-system interactions.
-- **Constructor/dependency wiring**: All new dependencies are threaded through constructors. No runtime lookups for pure C# objects. GameBootstrap changes are explicit.
+- **Constructor/dependency wiring**: All new dependencies are threaded through constructors. No runtime lookups for pure C# objects. GameFlowController changes are explicit.
 - **Consistency with TDD.md**: Plan aligns with documented architecture. New patterns are justified, not accidental divergence.
 
 ### Deliverable Sign-Off Checklist
+
+**Trigger:** When the user says "signed off", "sign off", "ready for next story", or similar completion phrases, immediately run through ALL uncompleted checklist items below before confirming completion. Do not wait for the user to ask — proactively execute every step that hasn't been done yet in the current story.
 
 Before a deliverable is considered complete:
 - All acceptance criteria have passing tests

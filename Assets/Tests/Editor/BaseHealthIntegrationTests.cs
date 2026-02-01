@@ -32,7 +32,8 @@ public class BaseHealthIntegrationTests
             creepsPerSpawn: 1,
             creepSpeed: CREEP_SPEED,
             damageToBase: DAMAGE_PER_CREEP,
-            maxHealth: 3);
+            maxHealth: 3,
+            coinReward: 1);
 
         movementSystem = new MovementSystem(creepStore, arrivalThreshold: ARRIVAL_THRESHOLD);
         damageSystem = new DamageSystem(creepStore, baseStore, new ProjectileStore());

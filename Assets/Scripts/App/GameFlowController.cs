@@ -18,6 +18,7 @@ public class GameFlowController : MonoBehaviour
     [SerializeField] private CreepDef creepDef;
     [SerializeField] private TurretDef turretDef;
     [SerializeField] private BaseConfig baseConfig;
+    [SerializeField] private EconomyConfig economyConfig;
     [SerializeField] private LayerMask terrainLayerMask;
     [SerializeField] private GameObject losePopupPrefab;
     [SerializeField] private UIDocument hudDocument;
@@ -86,6 +87,13 @@ public class GameFlowController : MonoBehaviour
             return;
         }
 
+        if (economyConfig == null)
+        {
+            Debug.LogError("GameFlowController: EconomyConfig reference is not assigned.");
+            enabled = false;
+            return;
+        }
+
         if (terrainLayerMask.value == 0)
         {
             Debug.LogWarning("GameFlowController: terrainLayerMask is set to Nothing. Turret placement raycasts will never hit.");
@@ -102,8 +110,9 @@ public class GameFlowController : MonoBehaviour
         Vector3 basePosition = homeBase.transform.position;
         Vector3[] spawnPositions = ExtractSpawnPositions();
 
-        gameSession = new GameSession(baseConfig.MaxHealth);
+        gameSession = new GameSession(baseConfig.MaxHealth, economyConfig.StartingCoins);
 
+        // Phase 1 — World Update
         var spawnSystem = new SpawnSystem(
             gameSession.CreepStore,
             spawnPositions,
@@ -112,7 +121,8 @@ public class GameFlowController : MonoBehaviour
             spawnConfig.CreepsPerSpawn,
             creepDef.Speed,
             creepDef.DamageToBase,
-            creepDef.MaxHealth);
+            creepDef.MaxHealth,
+            creepDef.CoinReward);
 
         var movementSystem = new MovementSystem(gameSession.CreepStore);
 
@@ -120,11 +130,14 @@ public class GameFlowController : MonoBehaviour
         var placementSystem = new PlacementSystem(
             gameSession.TurretStore,
             placementInput,
+            gameSession.EconomyStore,
             turretDef.Range,
             turretDef.FireInterval,
             turretDef.Damage,
-            turretDef.ProjectileSpeed);
+            turretDef.ProjectileSpeed,
+            turretDef.Cost);
 
+        // Phase 2 — Combat
         var projectileSystem = new ProjectileSystem(
             gameSession.TurretStore,
             gameSession.CreepStore,
@@ -134,6 +147,14 @@ public class GameFlowController : MonoBehaviour
             gameSession.CreepStore,
             gameSession.BaseStore,
             gameSession.ProjectileStore);
+
+        // Phase 3 — Resolution
+        var economySystem = new EconomySystem(
+            gameSession.EconomyStore,
+            gameSession.TurretStore,
+            turretDef.Cost);
+
+        damageSystem.OnCreepKilled += economySystem.HandleCreepKilled;
 
         int creepPoolSize = (spawnPositions.Length > 0 ? spawnPositions.Length : 1)
                             * spawnConfig.CreepsPerSpawn * POOL_SIZE_MULTIPLIER;
@@ -154,7 +175,12 @@ public class GameFlowController : MonoBehaviour
 
         systemScheduler = new SystemScheduler(new IGameSystem[]
         {
-            spawnSystem, movementSystem, placementSystem, projectileSystem, damageSystem
+            // Phase 1 — World Update
+            spawnSystem, movementSystem, placementSystem,
+            // Phase 2 — Combat
+            projectileSystem, damageSystem,
+            // Phase 3 — Resolution
+            economySystem
         });
 
         stateMachine = new GameStateMachine();
@@ -173,15 +199,19 @@ public class GameFlowController : MonoBehaviour
         // Restart transitions registered when RestartState is implemented (Story 10)
 
         BaseHealthHud baseHealthHud = null;
+        CoinHud coinHud = null;
         if (hudDocument != null)
         {
             baseHealthHud = new BaseHealthHud(hudDocument);
+            coinHud = new CoinHud(hudDocument);
         }
 
         uiCoordinator = new GameUiCoordinator(
             stateMachine,
             gameSession.BaseStore,
+            gameSession.EconomyStore,
             baseHealthHud,
+            coinHud,
             losePopupPrefab,
             transform);
     }

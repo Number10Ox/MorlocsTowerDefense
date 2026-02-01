@@ -23,7 +23,8 @@ public class CreepSpawningIntegrationTests
             creepsPerSpawn: 1,
             creepSpeed: 10f,
             damageToBase: 1,
-            maxHealth: 3);
+            maxHealth: 3,
+            coinReward: 1);
 
         movementSystem = new MovementSystem(store, arrivalThreshold: 0.5f);
     }
@@ -78,7 +79,8 @@ public class CreepSpawningIntegrationTests
             creepsPerSpawn: 1,
             creepSpeed: 10f,
             damageToBase: 1,
-            maxHealth: 3);
+            maxHealth: 3,
+            coinReward: 1);
         var twoPointMovement = new MovementSystem(twoPointStore, arrivalThreshold: 0.5f);
 
         // Frame 1: Spawn both creeps

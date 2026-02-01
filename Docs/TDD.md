@@ -47,8 +47,8 @@ GameFlowController.Update() → GameStateMachine.Tick() → GameSession.BeginFra
 | Class | Type | Responsibility |
 |-------|------|---------------|
 | `GameFlowController` | MonoBehaviour | Composition root. Creates GameSession, state machine, states, system scheduler, systems, and presentation adapter. Configures transition table. Drives game loop via `Update()`. Gates system ticking by current state. Calls `GameSession.BeginFrame()` before system tick. |
-| `GameUiCoordinator` | Plain C# | State-driven presentation decisions: popup lifecycle, HUD visibility, health event forwarding. Subscribes to `GameStateMachine.OnStateChanged` and `BaseStore.OnBaseHealthChanged`. No simulation writes. Constructed by `GameFlowController`, torn down in `OnDestroy`. |
-| `GameSession` | Plain C# | Per-run session. Owns all stores (CreepStore, BaseStore, future: TurretStore, etc.). `BeginFrame()` flushes deferred store operations and clears per-frame change lists. `Reset()` resets all stores for game restart. Discarded and recreated on restart. |
+| `GameUiCoordinator` | Plain C# | State-driven presentation decisions: popup lifecycle, HUD visibility, health and coin event forwarding. Subscribes to `GameStateMachine.OnStateChanged`, `BaseStore.OnBaseHealthChanged`, and `EconomyStore.OnCoinsChanged`. No simulation writes. Constructed by `GameFlowController`, torn down in `OnDestroy`. |
+| `GameSession` | Plain C# | Per-run session. Owns all stores (CreepStore, BaseStore, TurretStore, ProjectileStore, EconomyStore). `BeginFrame()` flushes deferred store operations and clears per-frame change lists. `Reset()` resets all stores for game restart. Discarded and recreated on restart. |
 | `GameStateMachine` | Plain C# | Owns state registry and transition table. Resolves triggers to transitions. Fires `OnStateChanged` event. Processes pending triggers at tick start. |
 | `GameState` | Enum | State identifiers: `Init`, `Playing`, `Win`, `Lose`. |
 | `GameTrigger` | Enum | Semantic transition triggers: `SceneValidated`, `BaseDestroyed`, `AllWavesCleared`, `RestartRequested`. |
@@ -61,10 +61,13 @@ GameFlowController.Update() → GameStateMachine.Tick() → GameSession.BeginFra
 | `CreepStore` | Plain C# | Authoritative owner of the creep collection. `Add()`, `MarkForRemoval()`, `BeginFrame()` (flush removals, clear frame lists). Exposes `ActiveCreeps`, `SpawnedThisFrame`, `RemovedIdsThisFrame`. |
 | `SpawnSystem` | Plain C# : `IGameSystem` | Spawn timer. Creates `CreepSimData` entries via `CreepStore.Add()`. Depends on `CreepStore`, not on other systems. |
 | `MovementSystem` | Plain C# : `IGameSystem` | Advances creep positions toward base. Detects arrival, sets `ReachedBase = true`, and calls `CreepStore.MarkForRemoval()`. Depends on `CreepStore`, not on other systems. |
-| `DamageSystem` | Plain C# : `IGameSystem` | Two-phase damage processing. `ProcessProjectileHits()`: reads `ProjectileStore.HitsThisFrame`, applies damage to creeps (clamped to 0), marks dead creeps for removal, fires `OnCreepKilled` event. `ProcessBaseDamage()`: iterates `ActiveCreeps`, applies `BaseStore.ApplyDamage()` for each with `ReachedBase && !HasDealtBaseDamage && Health > 0`, sets `HasDealtBaseDamage = true`. Dead-creep guard prevents killed creeps from dealing base damage. |
+| `DamageSystem` | Plain C# : `IGameSystem` | Two-phase damage processing. `ProcessProjectileHits()`: reads `ProjectileStore.HitsThisFrame`, applies damage to creeps (clamped to 0), marks dead creeps for removal, fires `OnCreepKilled(creepId, coinReward)` event. `ProcessBaseDamage()`: iterates `ActiveCreeps`, applies `BaseStore.ApplyDamage()` for each with `ReachedBase && !HasDealtBaseDamage && Health > 0`, sets `HasDealtBaseDamage = true`. Dead-creep guard prevents killed creeps from dealing base damage. |
 | `ProjectileSystem` | Plain C# : `IGameSystem` | Turret firing (with inline target selection), projectile movement, and hit detection. `UpdateFireTimers()`: decrements cooldowns, finds nearest alive creep in range via sqrMagnitude scan, spawns homing projectile. `MoveProjectiles()`: advances projectiles toward target, records hits via `ProjectileStore.RecordHit()`, discards projectiles whose target is dead/removed. |
 | `ProjectileStore` | Plain C# | Authoritative owner of the projectile collection. Mirrors `CreepStore` with deferred removal: `Add()`, `MarkForRemoval()`, `BeginFrame()`. Exposes `ActiveProjectiles`, `SpawnedThisFrame`, `RemovedIdsThisFrame`. Additionally: `HitsThisFrame` list + `RecordHit(ProjectileHit)` for cross-system hit communication. |
 | `BaseStore` | Plain C# | Authoritative owner of base health. `ApplyDamage(int)` — idempotent after destruction (no event, no state change). `BeginFrame()` clears `DamageTakenThisFrame`. `Reset()` restores to max health. Fires `OnBaseHealthChanged` event for UI. |
+| `EconomyStore` | Plain C# | Authoritative owner of coin balance. `AddCoins(int)` increments and fires `OnCoinsChanged`. `TrySpendCoins(int)` atomically checks and deducts (returns false if insufficient). `CanAfford(int)` read-only check. `BeginFrame()` clears per-frame counters. `Reset()` restores to starting coins. Single writer: `EconomySystem`. |
+| `EconomySystem` | Plain C# : `IGameSystem` | Phase 3 resolution. Subscribes to `DamageSystem.OnCreepKilled` — buffers rewards locally (handler discipline). `Tick()` applies buffered credits via `EconomyStore.AddCoins`, reads `TurretStore.PlacedThisFrame` to deduct costs via `EconomyStore.TrySpendCoins`. No CreepStore dependency. |
+| `CoinHud` | Plain C# | Stateless view for coin display. Queries `coin-label` and `coin-container` from shared `UIDocument`. `UpdateCoins(int)` sets label text. `SetVisible(bool)` toggles display. |
 | `HomeBaseComponent` | MonoBehaviour | Thin component on Base GameObject. Identifies the base for system discovery. |
 | `SpawnPointComponent` | MonoBehaviour | Thin component on SpawnPoint GameObjects. Identifies spawn positions for bootstrap discovery. |
 | `CreepComponent` | MonoBehaviour + `IPoolable` | Thin component on creep prefab instances. Holds `CreepId` for sim-to-GO mapping. Pool lifecycle: activate on get, deactivate on return. |
@@ -95,7 +98,7 @@ Reset: Transitioning back to `Init` triggers `PlayingState.Exit()` (tear down sp
 #### Component & System Pattern
 
 - **Scene components** (MonoBehaviours): Thin scene presence. Hold serialized references, identify GameObjects for system discovery, no game logic. Examples: `HomeBaseComponent`, `CreepComponent`, `TurretComponent`, `SpawnPointComponent`. Throughout this document, "component" always refers to these MonoBehaviour scene markers — not simulation data.
-- **Stores** (plain C# classes): Authoritative owners of simulation data collections. Stores manage the lifecycle of their entities: add, mark for removal, flush deferred removals. Stores expose per-frame change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`) that consumers (presentation adapter, other stores) read without events. `GameSession` owns all stores and calls `BeginFrame()` at a known phase boundary. Examples: `CreepStore` (future: `TurretStore`, `ProjectileStore`).
+- **Stores** (plain C# classes): Authoritative owners of simulation data collections. Stores manage the lifecycle of their entities: add, mark for removal, flush deferred removals. Stores expose per-frame change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`) that consumers (presentation adapter, other stores) read without events. `GameSession` owns all stores and calls `BeginFrame()` at a known phase boundary. Examples: `CreepStore`, `BaseStore`, `TurretStore`, `ProjectileStore`, `EconomyStore`.
 - **Simulation data** (plain C# classes): Per-entity game state held in stores. Positions, health, targets, economy balance, status effects. No Unity types (`Transform`, `GameObject`) in sim data. At this project's entity counts (tens of creeps, tens of turrets), classes are the pragmatic default — they avoid the copy-modify-write-back friction of mutable structs stored in collections. Reserve structs for small, immutable value types (e.g., `GridPosition`) or cases where cache locality measurably matters.
 - **Systems** (plain C# classes implementing `IGameSystem`): Own all game logic. Depend on stores for data access, not on other systems. Created by `GameFlowController`, registered with `SystemScheduler` as an ordered array, ticked in deterministic order. Systems are global — they exist independently of game states. The state machine gates *when* systems tick, not *who* ticks them. Examples: `SpawnSystem`, `MovementSystem`, `PlacementSystem`, `ProjectileSystem`, `DamageSystem`, `EconomySystem`, `WaveSystem`.
 
@@ -175,13 +178,22 @@ Stores themselves provide lifecycle operations (`Add`, `MarkForRemoval`, `BeginF
 | Turret fire cooldown | TurretStore (field: FireCooldown) | ProjectileSystem | — |
 | Projectile positions & state | ProjectileStore (fields: Position, TargetCreepId, Damage, Speed) | ProjectileSystem | PresentationAdapter |
 | Projectile hits per frame | ProjectileStore (HitsThisFrame) | ProjectileSystem (RecordHit) | DamageSystem |
+| Creep coin reward | CreepStore (field: CoinReward) | SpawnSystem (at creation) | DamageSystem (passes through OnCreepKilled event) |
 | Base health | BaseStore (field: CurrentHealth) | DamageSystem | PlayingState (end condition), BaseHealthHud |
-| Coin balance | (Future: EconomyStore) | EconomySystem | PlacementSystem (affordability), PresentationAdapter |
+| Coin balance | EconomyStore (field: CurrentCoins) | EconomySystem | PlacementSystem (affordability via CanAfford), CoinHud (via OnCoinsChanged) |
 | Wave progress | (Future: WaveStore) | WaveSystem | PlayingState (end condition), PresentationAdapter |
 | Player input (placement) | PlacementInput | PresentationAdapter (CollectInput) | PlacementSystem |
 | Active status effects (slow, etc.) | CreepStore (field: effects) | DamageSystem | MovementSystem |
 
 Cross-system communication happens through the deterministic tick order and store change lists, not through event-driven mutation. Systems write to stores during their `Tick()`. Stores buffer deferred operations (e.g., `MarkForRemoval`) and expose per-frame change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`). `GameSession.BeginFrame()` flushes deferred operations at a known phase boundary, before systems tick. This guarantees that system execution order determines when state changes take effect.
+
+#### Frame-Timing Contracts
+
+These contracts document deliberate frame-timing behaviors that arise from the deterministic tick order. They are not bugs — they are design choices that keep the system consistent and predictable.
+
+**Coin-timing contract (next-frame spendability):** Kill rewards are applied in Phase 3 (`EconomySystem.Tick()` calls `EconomyStore.AddCoins`). `PlacementSystem` checks `EconomyStore.CanAfford()` in Phase 1 of the *same* frame, before `EconomySystem` has run. Therefore coins earned from kills are not spendable until the next frame. This is consistent with the deferred-removal pattern: entities marked for removal in one frame are flushed in `BeginFrame()` the next frame; coin credits follow the same "write now, visible next frame" rhythm. If immediate same-frame spendability were needed, `EconomySystem` would need to run before `PlacementSystem`, which would break Phase ordering (resolution before world update).
+
+**One-placement-per-frame invariant:** At most one turret can be placed per frame. `PresentationAdapter.CollectInput()` runs before systems tick and writes a single placement request (or none) into `PlacementInput`. `PlacementSystem` reads and clears `PlacementInput` during its tick. Even if the player clicks rapidly, Unity delivers at most one click event per `Update()` frame, and `CollectInput()` overwrites any prior value. This invariant simplifies `EconomySystem`'s deduction logic: `PlacedThisFrame.Count` is always 0 or 1, and a single `TrySpendCoins(turretCost)` call per placement suffices.
 
 **Status effect pattern (Story 7):** The freezing turret introduces a cross-system concern — DamageSystem applies a slow effect, but MovementSystem owns creep velocity. To preserve single-writer discipline: DamageSystem writes status effect records (effect type, duration, remaining time) to a per-creep status effect field in CreepStore. MovementSystem reads those records during its tick and adjusts speed accordingly. DamageSystem never writes to velocity; MovementSystem never writes to status effects. The phase ordering guarantees that Combat (Phase 2) writes effects before the next frame's World Update (Phase 1) reads them.
 
@@ -207,14 +219,13 @@ Assets/Scripts/
 │   ├── Scheduling/         # SystemScheduler, IGameSystem
 │   └── Pooling/            # GameObjectPool, IPoolable (namespace: ObjectPooling)
 ├── States/                 # InitState, PlayingState, LoseState
-├── Stores/                 # CreepStore, BaseStore, TurretStore, ProjectileStore
+├── Stores/                 # CreepStore, BaseStore, TurretStore, ProjectileStore, EconomyStore
 ├── SimData/                # CreepSimData, TurretSimData, ProjectileSimData, ProjectileHit
-├── Systems/                # SpawnSystem, MovementSystem, PlacementSystem, ProjectileSystem, DamageSystem
+├── Systems/                # SpawnSystem, MovementSystem, PlacementSystem, ProjectileSystem, DamageSystem, EconomySystem
 ├── Components/             # SpawnPointComponent, HomeBaseComponent, CreepComponent, TurretComponent, ProjectileComponent
 ├── Input/                  # PlacementInput
-├── Presentation/           # PresentationAdapter, GameUiCoordinator, BaseHealthHud (.cs + UI Toolkit assets)
-├── Data/                   # ScriptableObject definitions (CreepDef, SpawnConfig, BaseConfig, TurretDef)
-├── Economy/                # (Story 6+)
+├── Presentation/           # PresentationAdapter, GameUiCoordinator, BaseHealthHud, CoinHud (.cs + UI Toolkit assets)
+├── Data/                   # ScriptableObject definitions (CreepDef, SpawnConfig, BaseConfig, TurretDef, EconomyConfig)
 └── Waves/                  # (Story 9)
 ```
 
@@ -274,17 +285,17 @@ The spec emphasizes making gameplay values "easy to tweak and tune." All gamepla
 
 | SO Class | Fields | Purpose | Story |
 |----------|--------|---------|-------|
-| `CreepDef` | `float speed`, `int damageToBase`, `int maxHealth` | Per-creep-type stats. Future: `int coinReward`. | 2-5 |
+| `CreepDef` | `float speed`, `int damageToBase`, `int maxHealth`, `int coinReward` | Per-creep-type stats. | 2-6 |
 | `SpawnConfig` | `float spawnInterval`, `int creepsPerSpawn` | Spawn timing. Temporary driver until WaveSystem (Story 9) takes over. | 2 |
 | `BaseConfig` | `int maxHealth` | Base health tuning. | 3 |
-| `TurretDef` | `int damage`, `float range`, `float fireInterval`, `float projectileSpeed` | Per-turret-type stats. Future: `int cost`, `effectType`. | 5 |
+| `TurretDef` | `int damage`, `float range`, `float fireInterval`, `float projectileSpeed`, `int cost` | Per-turret-type stats. Future: `effectType`. | 5-6 |
+| `EconomyConfig` | `int startingCoins` | Global economy tuning. | 6 |
 
 ### Planned ScriptableObjects (not yet implemented)
 
 | SO Class | Expected Fields | Purpose | Story |
 |----------|----------------|---------|-------|
 | `WaveDef` | creep types, counts, intervals, delay | Per-wave spawn schedule | 9 |
-| `EconomyConfig` | startingCoins | Global economy tuning | 6 |
 
 ### Asset Loading
 
