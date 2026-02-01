@@ -341,7 +341,12 @@ Assets/
 │   │   ├── CreepDef.cs
 │   │   ├── SpawnConfig.cs
 │   │   └── BaseConfig.cs
-│   ├── Turrets/                # (Story 4+)
+│   ├── Turrets/                # Turret store, sim data, placement system, input, component
+│   │   ├── TurretStore.cs
+│   │   ├── TurretSimData.cs
+│   │   ├── PlacementSystem.cs
+│   │   ├── PlacementInput.cs
+│   │   └── TurretComponent.cs
 │   ├── Combat/                 # DamageSystem (Story 3+)
 │   ├── Economy/                # (Story 6+)
 │   ├── Waves/                  # (Story 9)
@@ -361,7 +366,10 @@ Assets/
 │   │   ├── DamageSystemTests.cs
 │   │   ├── PlayingStateTests.cs
 │   │   ├── LoseStateTests.cs
-│   │   └── BaseHealthIntegrationTests.cs
+│   │   ├── BaseHealthIntegrationTests.cs
+│   │   ├── TurretStoreTests.cs
+│   │   ├── PlacementSystemTests.cs
+│   │   └── TurretPlacementIntegrationTests.cs
 │   └── Runtime/
 │       └── RuntimeTests.asmdef
 ├── Prefabs/                    # (provided, unchanged)
@@ -667,3 +675,120 @@ sequenceDiagram
 - **Frame N+1**: `PlayingState.Tick()` detects `IsDestroyed`, fires `BaseDestroyed` (pending trigger).
 - **Frame N+2**: State machine resolves trigger, transitions to Lose, popup appears.
 - Systems do not tick in Lose state (gated by `CurrentStateId == Playing` in `GameBootstrap.Update()`).
+
+---
+
+## Story 4 — Turret Placement
+
+### Class Diagram
+
+```mermaid
+classDiagram
+    class TurretStore {
+        -List~TurretSimData~ activeTurrets
+        -List~TurretSimData~ placedThisFrame
+        +IReadOnlyList~TurretSimData~ ActiveTurrets
+        +IReadOnlyList~TurretSimData~ PlacedThisFrame
+        +Add(TurretSimData)
+        +BeginFrame()
+        +Reset()
+    }
+
+    class TurretSimData {
+        +int Id
+        +Vector3 Position
+    }
+
+    class PlacementInput {
+        +bool PlaceRequested
+        +Vector3 WorldPosition
+        +Clear()
+    }
+
+    class PlacementSystem {
+        -TurretStore turretStore
+        -PlacementInput placementInput
+        -int nextTurretId
+        +Tick(float deltaTime)
+        +Reset()
+    }
+
+    class TurretComponent {
+        <<MonoBehaviour>>
+        -int turretId
+        +int TurretId
+        +Initialize(int)
+        +OnPoolGet()
+        +OnPoolReturn()
+    }
+
+    GameSession --> TurretStore : owns
+    TurretStore --> "0..*" TurretSimData : stores
+    PlacementSystem --> TurretStore : writes via Add()
+    PlacementSystem --> PlacementInput : reads
+    PlacementSystem ..|> IGameSystem
+    TurretComponent ..|> IPoolable
+    PresentationAdapter --> TurretStore : reads PlacedThisFrame
+    PresentationAdapter --> PlacementInput : writes in CollectInput()
+    PresentationAdapter --> GameObjectPool : manages turret GOs
+    GameBootstrap --> PlacementInput : creates and passes to both sides
+```
+
+**Notes:**
+- `PlacementInput` is a shared object created by `GameBootstrap` and passed to both `PresentationAdapter` (writer) and `PlacementSystem` (reader). Neither depends on the other.
+- `TurretStore` is minimal for Story 4: no removal pipeline. `BeginFrame()` clears `PlacedThisFrame`. `Reset()` clears everything.
+- `PlacementSystem` clears `PlacementInput` after consuming to prevent double-placement if execution order changes.
+- `TurretComponent` follows `CreepComponent` pattern: thin MonoBehaviour + `IPoolable`, no logic.
+
+### Turret Placement Sequence
+
+```mermaid
+sequenceDiagram
+    participant Unity
+    participant Bootstrap as GameBootstrap
+    participant Pres as PresentationAdapter
+    participant Input as PlacementInput
+    participant Session as GameSession
+    participant TStore as TurretStore
+    participant Place as PlacementSystem
+    participant Pool as GameObjectPool
+
+    Note over Unity: Frame N — player clicks terrain
+
+    Unity->>Bootstrap: Update()
+    Bootstrap->>Pres: CollectInput()
+    Note over Pres: Mouse.leftButton.wasPressedThisFrame
+    Pres->>Pres: Raycast against terrain
+    Pres->>Input: PlaceRequested=true‚ WorldPosition=hitPoint
+
+    Bootstrap->>Session: BeginFrame()
+    Session->>TStore: BeginFrame()
+    Note over TStore: Clear placedThisFrame
+
+    Bootstrap->>Place: Tick(dt)
+    Note over Place: PlaceRequested? → yes
+    Place->>TStore: Add(turretSimData)
+    Note over TStore: Added to activeTurrets + placedThisFrame
+    Place->>Input: Clear()
+
+    Bootstrap->>Pres: SyncVisuals()
+    Pres->>TStore: Read PlacedThisFrame
+    Pres->>Pool: Get(position)
+    Note over Pres: Creates GO‚ maps to turret ID
+
+    Note over Unity: Frame N+1 — no click
+
+    Unity->>Bootstrap: Update()
+    Bootstrap->>Pres: CollectInput()
+    Note over Pres: No click → PlacementInput stays clear
+
+    Bootstrap->>Session: BeginFrame()
+    Session->>TStore: BeginFrame()
+    Note over TStore: Clear placedThisFrame (turret stays in activeTurrets)
+
+    Bootstrap->>Place: Tick(dt)
+    Note over Place: PlaceRequested? → no‚ skip
+
+    Bootstrap->>Pres: SyncVisuals()
+    Note over Pres: No new turrets to spawn‚ existing turret GO persists
+```

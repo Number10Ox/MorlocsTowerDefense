@@ -166,13 +166,13 @@ Stores themselves provide lifecycle operations (`Add`, `MarkForRemoval`, `BeginF
 | Creep spawn queue | (Future: WaveStore) | WaveSystem | SpawnSystem |
 | Creep positions & velocity | CreepStore (field: Position) | MovementSystem | TargetingSystem, DamageSystem, PresentationAdapter |
 | Creep health | CreepStore (field: Health) | DamageSystem | EconomySystem, PresentationAdapter |
-| Turret placement & positions | (Future: TurretStore) | PlacementSystem | TargetingSystem, PresentationAdapter |
+| Turret placement & positions | TurretStore (field: Position) | PlacementSystem | TargetingSystem, PresentationAdapter |
 | Turret target assignments | (Future: TurretStore) | TargetingSystem | ProjectileSystem |
 | Projectile positions & state | (Future: ProjectileStore) | ProjectileSystem | DamageSystem, PresentationAdapter |
 | Base health | BaseStore (field: CurrentHealth) | DamageSystem | PlayingState (end condition), BaseHealthHud |
 | Coin balance | (Future: EconomyStore) | EconomySystem | PlacementSystem (affordability), PresentationAdapter |
 | Wave progress | (Future: WaveStore) | WaveSystem | PlayingState (end condition), PresentationAdapter |
-| Player input (placement) | PresentationAdapter | - | PlacementSystem |
+| Player input (placement) | PlacementInput | PresentationAdapter (CollectInput) | PlacementSystem |
 | Active status effects (slow, etc.) | CreepStore (field: effects) | DamageSystem | MovementSystem |
 
 Cross-system communication happens through the deterministic tick order and store change lists, not through event-driven mutation. Systems write to stores during their `Tick()`. Stores buffer deferred operations (e.g., `MarkForRemoval`) and expose per-frame change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`). `GameSession.BeginFrame()` flushes deferred operations at a known phase boundary, before systems tick. This guarantees that system execution order determines when state changes take effect.

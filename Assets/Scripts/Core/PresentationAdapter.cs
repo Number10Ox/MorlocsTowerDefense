@@ -1,35 +1,72 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using ObjectPooling;
 
 public class PresentationAdapter
 {
     private const int INITIAL_CREEP_MAP_CAPACITY = 32;
+    private const int INITIAL_TURRET_MAP_CAPACITY = 16;
 
     private readonly CreepStore creepStore;
     private readonly GameObjectPool creepPool;
     private readonly Dictionary<int, CreepComponent> creepMap;
 
-    public PresentationAdapter(CreepStore creepStore, GameObjectPool creepPool)
+    private readonly TurretStore turretStore;
+    private readonly GameObjectPool turretPool;
+    private readonly Dictionary<int, TurretComponent> turretMap;
+
+    private readonly PlacementInput placementInput;
+    private readonly Camera camera;
+    private readonly LayerMask terrainLayerMask;
+
+    public PresentationAdapter(
+        CreepStore creepStore,
+        GameObjectPool creepPool,
+        TurretStore turretStore,
+        GameObjectPool turretPool,
+        PlacementInput placementInput,
+        Camera camera,
+        LayerMask terrainLayerMask)
     {
         this.creepStore = creepStore ?? throw new ArgumentNullException(nameof(creepStore));
         this.creepPool = creepPool ?? throw new ArgumentNullException(nameof(creepPool));
+        this.turretStore = turretStore ?? throw new ArgumentNullException(nameof(turretStore));
+        this.turretPool = turretPool ?? throw new ArgumentNullException(nameof(turretPool));
+        this.placementInput = placementInput ?? throw new ArgumentNullException(nameof(placementInput));
+        this.camera = camera != null ? camera : throw new ArgumentNullException(nameof(camera));
+        this.terrainLayerMask = terrainLayerMask;
+
         creepMap = new Dictionary<int, CreepComponent>(INITIAL_CREEP_MAP_CAPACITY);
+        turretMap = new Dictionary<int, TurretComponent>(INITIAL_TURRET_MAP_CAPACITY);
     }
 
     public void CollectInput()
     {
+        var mouse = Mouse.current;
+        if (mouse == null) return;
+        if (!mouse.leftButton.wasPressedThisFrame) return;
+
+        Vector2 screenPos = mouse.position.ReadValue();
+        Ray ray = camera.ScreenPointToRay(screenPos);
+
+        if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity, terrainLayerMask))
+        {
+            placementInput.PlaceRequested = true;
+            placementInput.WorldPosition = hit.point;
+        }
     }
 
     public void SyncVisuals()
     {
-        ProcessRemovals();
-        ProcessSpawns();
-        UpdatePositions();
+        ProcessCreepRemovals();
+        ProcessCreepSpawns();
+        UpdateCreepPositions();
+        ProcessTurretSpawns();
     }
 
-    private void ProcessRemovals()
+    private void ProcessCreepRemovals()
     {
         var removed = creepStore.RemovedIdsThisFrame;
         for (int i = 0; i < removed.Count; i++)
@@ -43,7 +80,7 @@ public class PresentationAdapter
         }
     }
 
-    private void ProcessSpawns()
+    private void ProcessCreepSpawns()
     {
         var spawned = creepStore.SpawnedThisFrame;
         for (int i = 0; i < spawned.Count; i++)
@@ -68,7 +105,7 @@ public class PresentationAdapter
         }
     }
 
-    private void UpdatePositions()
+    private void UpdateCreepPositions()
     {
         var active = creepStore.ActiveCreeps;
         for (int i = 0; i < active.Count; i++)
@@ -77,6 +114,31 @@ public class PresentationAdapter
             if (creepMap.TryGetValue(creep.Id, out CreepComponent comp))
             {
                 comp.transform.position = creep.Position;
+            }
+        }
+    }
+
+    private void ProcessTurretSpawns()
+    {
+        var placed = turretStore.PlacedThisFrame;
+        for (int i = 0; i < placed.Count; i++)
+        {
+            TurretSimData turret = placed[i];
+            GameObject go = turretPool.Get(turret.Position);
+            if (go.TryGetComponent(out TurretComponent comp))
+            {
+                if (turretMap.ContainsKey(turret.Id))
+                {
+                    Debug.LogWarning($"PresentationAdapter: Duplicate turret Id={turret.Id}. Overwriting visual binding.");
+                }
+
+                comp.Initialize(turret.Id);
+                turretMap[turret.Id] = comp;
+            }
+            else
+            {
+                Debug.LogError($"PresentationAdapter: Turret prefab is missing TurretComponent. Id={turret.Id}");
+                turretPool.Return(go);
             }
         }
     }

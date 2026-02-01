@@ -20,7 +20,7 @@
 | Story 1: Project Foundation | Complete | Game bootstrap, state machine, system scheduler, folder structure, test infrastructure |
 | Story 2: Creep Spawning & Movement | Complete | CreepStore, SpawnSystem, MovementSystem, object pooling, PresentationAdapter sync |
 | Story 3: Base Health & Lose Condition | Complete | BaseStore, DamageSystem, LoseState, BaseConfig SO, BaseHealthHud (UI Toolkit), health HUD event-driven |
-| Story 4: Turret Placement | Not started | |
+| Story 4: Turret Placement | Complete | TurretStore (minimal, no removal pipeline), PlacementSystem, PlacementInput bridge, TurretComponent, PresentationAdapter input collection (raycast) + turret visual sync, turret pool |
 | Story 5: Turret Shooting & Creep Damage | Not started | |
 | Story 6: Economy System | Not started | |
 | Story 7: Turret Types (Regular & Freezing) | Not started | |
@@ -48,6 +48,9 @@
 - **PlayingState polls for end conditions**: Event handler discipline forbids firing game triggers from event handlers. `PlayingState.Tick()` polls `baseStore.IsDestroyed` instead.
 - **HUD event-driven**: `BaseHealthHud` updates via `BaseStore.OnBaseHealthChanged` event (pure presentation, no mutation).
 - **LosePopup via bootstrap**: `GameBootstrap.OnStateChanged` instantiates the LosePopup from a prefab reference on enter, destroys it on exit. Presentation concern only.
+- **PlacementInput as shared bridge**: `PlacementInput` class created by `GameBootstrap` and passed to both `PresentationAdapter` (writer in `CollectInput`) and `PlacementSystem` (reader in `Tick`). Neither depends on the other. Consume-and-clear pattern: `PlacementSystem` clears input after consuming to prevent double-placement.
+- **TurretStore minimal for Story 4**: No removal pipeline (`MarkForRemoval`, `RemovedIdsThisFrame`). Only `ActiveTurrets`, `PlacedThisFrame`, `BeginFrame` (clears placed list), `Reset`. Removal deferred to a story that needs turret destruction/selling.
+- **Terrain raycast via LayerMask**: `GameBootstrap` exposes `LayerMask terrainLayerMask` serialized field, passed to `PresentationAdapter`. `CollectInput()` raycasts against this layer using Input System (`Mouse.current`).
 
 ## Open Questions
 

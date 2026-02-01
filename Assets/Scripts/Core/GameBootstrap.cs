@@ -4,13 +4,16 @@ using UnityEngine.UIElements;
 public class GameBootstrap : MonoBehaviour
 {
     private const int POOL_SIZE_MULTIPLIER = 10;
+    private const int INITIAL_TURRET_POOL_SIZE = 20;
 
     [SerializeField] private HomeBaseComponent homeBase;
     [SerializeField] private SpawnPointComponent[] spawnPoints;
     [SerializeField] private GameObject creepPrefab;
+    [SerializeField] private GameObject turretPrefab;
     [SerializeField] private SpawnConfig spawnConfig;
     [SerializeField] private CreepDef creepDef;
     [SerializeField] private BaseConfig baseConfig;
+    [SerializeField] private LayerMask terrainLayerMask;
     [SerializeField] private GameObject losePopupPrefab;
     [SerializeField] private UIDocument hudDocument;
 
@@ -37,6 +40,13 @@ public class GameBootstrap : MonoBehaviour
             return;
         }
 
+        if (turretPrefab == null)
+        {
+            Debug.LogError("GameBootstrap: Turret prefab reference is not assigned.");
+            enabled = false;
+            return;
+        }
+
         if (spawnConfig == null)
         {
             Debug.LogError("GameBootstrap: SpawnConfig reference is not assigned.");
@@ -58,6 +68,19 @@ public class GameBootstrap : MonoBehaviour
             return;
         }
 
+        if (terrainLayerMask.value == 0)
+        {
+            Debug.LogWarning("GameBootstrap: terrainLayerMask is set to Nothing. Turret placement raycasts will never hit.");
+        }
+
+        Camera mainCamera = Camera.main;
+        if (mainCamera == null)
+        {
+            Debug.LogError("GameBootstrap: No main camera found in scene.");
+            enabled = false;
+            return;
+        }
+
         Vector3 basePosition = homeBase.transform.position;
         Vector3[] spawnPositions = ExtractSpawnPositions();
 
@@ -75,12 +98,28 @@ public class GameBootstrap : MonoBehaviour
         var movementSystem = new MovementSystem(gameSession.CreepStore);
         var damageSystem = new DamageSystem(gameSession.CreepStore, gameSession.BaseStore);
 
-        int poolSize = (spawnPositions.Length > 0 ? spawnPositions.Length : 1)
-                       * spawnConfig.CreepsPerSpawn * POOL_SIZE_MULTIPLIER;
-        var creepPool = new ObjectPooling.GameObjectPool(creepPrefab, poolSize, transform);
+        var placementInput = new PlacementInput();
+        var placementSystem = new PlacementSystem(gameSession.TurretStore, placementInput);
 
-        presentationAdapter = new PresentationAdapter(gameSession.CreepStore, creepPool);
-        systemScheduler = new SystemScheduler(new IGameSystem[] { spawnSystem, movementSystem, damageSystem });
+        int creepPoolSize = (spawnPositions.Length > 0 ? spawnPositions.Length : 1)
+                            * spawnConfig.CreepsPerSpawn * POOL_SIZE_MULTIPLIER;
+        var creepPool = new ObjectPooling.GameObjectPool(creepPrefab, creepPoolSize, transform);
+        var turretPool = new ObjectPooling.GameObjectPool(turretPrefab, INITIAL_TURRET_POOL_SIZE, transform);
+
+        presentationAdapter = new PresentationAdapter(
+            gameSession.CreepStore,
+            creepPool,
+            gameSession.TurretStore,
+            turretPool,
+            placementInput,
+            mainCamera,
+            terrainLayerMask);
+
+        systemScheduler = new SystemScheduler(new IGameSystem[]
+        {
+            spawnSystem, movementSystem, placementSystem, damageSystem
+        });
+
         stateMachine = new GameStateMachine();
 
         var initState = new InitState(stateMachine.Fire, homeBase);
