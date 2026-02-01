@@ -1,5 +1,6 @@
 using UnityEngine;
 
+// Inspector-tunable spawn timing. Temporary driver until WaveSystem (Story 9).
 [CreateAssetMenu(fileName = "NewSpawnConfig", menuName = "Game/Spawn Config")]
 public class SpawnConfig : ScriptableObject
 {

@@ -17,7 +17,7 @@
 
 | Story | Status | Notes |
 |-------|--------|-------|
-| Story 1: Project Foundation | Complete | Game bootstrap, state machine, system scheduler, folder structure, test infrastructure |
+| Story 1: Project Foundation | Complete | GameFlowController (composition root), state machine, system scheduler, folder structure, test infrastructure |
 | Story 2: Creep Spawning & Movement | Complete | CreepStore, SpawnSystem, MovementSystem, object pooling, PresentationAdapter sync |
 | Story 3: Base Health & Lose Condition | Complete | BaseStore, DamageSystem, LoseState, BaseConfig SO, BaseHealthHud (UI Toolkit), health HUD event-driven |
 | Story 4: Turret Placement | Complete | TurretStore (minimal, no removal pipeline), PlacementSystem, PlacementInput bridge, TurretComponent, PresentationAdapter input collection (raycast) + turret visual sync, turret pool |
@@ -47,8 +47,8 @@
 - **Per-frame damage tracking**: `BaseStore.DamageTakenThisFrame` justifies the `BeginFrame()` API and enables UI effects/test assertions.
 - **PlayingState polls for end conditions**: Event handler discipline forbids firing game triggers from event handlers. `PlayingState.Tick()` polls `baseStore.IsDestroyed` instead.
 - **HUD event-driven**: `BaseHealthHud` updates via `BaseStore.OnBaseHealthChanged` event (pure presentation, no mutation).
-- **LosePopup via bootstrap**: `GameBootstrap.OnStateChanged` instantiates the LosePopup from a prefab reference on enter, destroys it on exit. Presentation concern only.
-- **PlacementInput as shared bridge**: `PlacementInput` class created by `GameBootstrap` and passed to both `PresentationAdapter` (writer in `CollectInput`) and `PlacementSystem` (reader in `Tick`). Neither depends on the other. Consume-and-clear pattern: `PlacementSystem` clears input after consuming to prevent double-placement.
+- **LosePopup via GameUiCoordinator**: `GameUiCoordinator.OnStateChanged` instantiates the LosePopup from a prefab reference on enter, destroys it on exit. Presentation concern only.
+- **PlacementInput as shared bridge**: `PlacementInput` class created by `GameFlowController` and passed to both `PresentationAdapter` (writer in `CollectInput`) and `PlacementSystem` (reader in `Tick`). Neither depends on the other. Consume-and-clear pattern: `PlacementSystem` clears input after consuming to prevent double-placement.
 - **TurretStore minimal for Story 4**: No removal pipeline (`MarkForRemoval`, `RemovedIdsThisFrame`). Only `ActiveTurrets`, `PlacedThisFrame`, `BeginFrame` (clears placed list), `Reset`. Removal deferred to a story that needs turret destruction/selling.
 - **Terrain raycast via LayerMask**: `GameBootstrap` exposes `LayerMask terrainLayerMask` serialized field, passed to `PresentationAdapter`. `CollectInput()` raycasts against this layer using Input System (`Mouse.current`).
 - **No TargetingSystem**: Target selection merged into `ProjectileSystem` at fire time. Eliminates a whole system class and cross-system coupling field (`TargetCreepId` on turret). Targeting is ephemeral — nearest alive creep in range is found at the moment of firing.
@@ -59,9 +59,11 @@
 - **FireInterval naming**: Consistent use of `FireInterval` (seconds between shots) across all code and data. No `FireRate`.
 - **TurretDef SO**: ScriptableObject for turret stats (damage, range, fireInterval, projectileSpeed). Systems receive primitives at bootstrap, never SO references.
 - **ProjectileStore with deferred removal**: Mirrors CreepStore pattern — `Add`, `MarkForRemoval`, `BeginFrame` (flush + clear frame lists). Plus `HitsThisFrame` for cross-system hit communication.
+- **GameBootstrap renamed to GameFlowController**: Composition root + game loop pump only. Class suffix taxonomy established (Controller, Coordinator, Adapter, System, Store, State).
+- **GameUiCoordinator extracted**: Presentation state decisions (popup lifecycle, HUD visibility, health forwarding) extracted from GameFlowController into `GameUiCoordinator`. Subscribes to state machine and store events. No simulation writes. Idempotent Teardown.
+- **Folder restructure: domain-based → role-based**: Reorganized from feature folders (Core/, Creeps/, Turrets/, Combat/) to role-based folders (App/, Framework/, States/, Stores/, SimData/, Systems/, Components/, Input/, Presentation/, Data/). All within single `Game.asmdef`.
 
 ## Open Questions
 
 - Addressables loading infrastructure (deferred until extensibility is needed, likely Story 8)
 - Remaining Data Configuration Strategy entries (turret defs, wave defs, economy config)
-- **Extract presentation concerns from GameBootstrap** — popup instantiation, HUD visibility toggling, and health event forwarding should move to a `PresentationController` or similar class. GameBootstrap should be startup wiring + Update pump only. Good time: when more presentation concerns arrive (turret placement UI, economy HUD).

@@ -1,5 +1,6 @@
 using UnityEngine;
 
+// Inspector-tunable turret stats: damage, range, fire interval, projectile speed. One asset per type.
 [CreateAssetMenu(fileName = "NewTurretDef", menuName = "Game/Turret Definition")]
 public class TurretDef : ScriptableObject
 {

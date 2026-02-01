@@ -34,19 +34,20 @@ These are architectural directions that will inform the detailed design. Not ful
 
 See [Architecture Diagrams](Architecture-Diagrams.md) for class diagrams, state diagrams, and sequence diagrams.
 
-#### Bootstrap & Game Loop
+#### Composition Root & Game Loop
 
-A single `GameBootstrap` MonoBehaviour in MainScene serves as the entry point and composition root. It creates the `GameSession` (which owns all stores), the `GameStateMachine`, all `IGameState` implementations, the `SystemScheduler`, and all gameplay systems. `Update()` ticks the state machine for flow control, calls `GameSession.BeginFrame()` to flush deferred store operations, then ticks the system scheduler when in gameplay states.
+A single `GameFlowController` MonoBehaviour in MainScene serves as the entry point and composition root. It creates the `GameSession` (which owns all stores), the `GameStateMachine`, all `IGameState` implementations, the `SystemScheduler`, and all gameplay systems. `Update()` ticks the state machine for flow control, calls `GameSession.BeginFrame()` to flush deferred store operations, then ticks the system scheduler when in gameplay states.
 
 ```
-GameBootstrap.Update() → GameStateMachine.Tick() → GameSession.BeginFrame() → SystemScheduler.Tick() (gated by state) → PresentationAdapter.SyncVisuals()
+GameFlowController.Update() → GameStateMachine.Tick() → GameSession.BeginFrame() → SystemScheduler.Tick() (gated by state) → PresentationAdapter.SyncVisuals()
 ```
 
 #### Class Responsibilities
 
 | Class | Type | Responsibility |
 |-------|------|---------------|
-| `GameBootstrap` | MonoBehaviour | Composition root. Creates GameSession, state machine, states, system scheduler, systems, and presentation adapter. Configures transition table. Drives game loop via `Update()`. Gates system ticking by current state. Calls `GameSession.BeginFrame()` before system tick. |
+| `GameFlowController` | MonoBehaviour | Composition root. Creates GameSession, state machine, states, system scheduler, systems, and presentation adapter. Configures transition table. Drives game loop via `Update()`. Gates system ticking by current state. Calls `GameSession.BeginFrame()` before system tick. |
+| `GameUiCoordinator` | Plain C# | State-driven presentation decisions: popup lifecycle, HUD visibility, health event forwarding. Subscribes to `GameStateMachine.OnStateChanged` and `BaseStore.OnBaseHealthChanged`. No simulation writes. Constructed by `GameFlowController`, torn down in `OnDestroy`. |
 | `GameSession` | Plain C# | Per-run session. Owns all stores (CreepStore, BaseStore, future: TurretStore, etc.). `BeginFrame()` flushes deferred store operations and clears per-frame change lists. `Reset()` resets all stores for game restart. Discarded and recreated on restart. |
 | `GameStateMachine` | Plain C# | Owns state registry and transition table. Resolves triggers to transitions. Fires `OnStateChanged` event. Processes pending triggers at tick start. |
 | `GameState` | Enum | State identifiers: `Init`, `Playing`, `Win`, `Lose`. |
@@ -54,8 +55,8 @@ GameBootstrap.Update() → GameStateMachine.Tick() → GameSession.BeginFrame() 
 | `IGameState` | Interface | Contract for game states: `Enter()`, `Tick(float)`, `Exit()`. |
 | `InitState` | Plain C# : `IGameState` | Validates scene setup (Base, SpawnPoints). Fires `SceneValidated`. Future: async Addressable loading. |
 | `PlayingState` | Plain C# : `IGameState` | Manages gameplay flow. Polls `BaseStore.IsDestroyed` in `Tick()` and fires `BaseDestroyed` once (guarded by `baseDestroyedFired` flag, reset on `Enter()`). Future: checks `AllWavesCleared`. Does not own or tick systems. |
-| `LoseState` | Plain C# : `IGameState` | Represents lose game state. Empty Enter/Tick/Exit — popup toggle handled by `GameBootstrap.OnStateChanged` as presentation. Future: `RestartRequested` trigger (Story 10). |
-| `SystemScheduler` | Plain C# | Owns the ordered `IGameSystem[]` array. Ticks systems sequentially. Owned by `GameBootstrap`, ticked when state machine is in gameplay states. |
+| `LoseState` | Plain C# : `IGameState` | Represents lose game state. Empty Enter/Tick/Exit — popup toggle handled by `GameUiCoordinator` as presentation. Future: `RestartRequested` trigger (Story 10). |
+| `SystemScheduler` | Plain C# | Owns the ordered `IGameSystem[]` array. Ticks systems sequentially. Owned by `GameFlowController`, ticked when state machine is in gameplay states. |
 | `IGameSystem` | Interface | Contract for gameplay systems: `Tick(float)`. |
 | `CreepStore` | Plain C# | Authoritative owner of the creep collection. `Add()`, `MarkForRemoval()`, `BeginFrame()` (flush removals, clear frame lists). Exposes `ActiveCreeps`, `SpawnedThisFrame`, `RemovedIdsThisFrame`. |
 | `SpawnSystem` | Plain C# : `IGameSystem` | Spawn timer. Creates `CreepSimData` entries via `CreepStore.Add()`. Depends on `CreepStore`, not on other systems. |
@@ -73,7 +74,7 @@ GameBootstrap.Update() → GameStateMachine.Tick() → GameSession.BeginFrame() 
 
 **Trigger-based transitions** — States fire semantic triggers describing *what happened*; the state machine resolves triggers against a declarative transition table to determine *where to go*. States never reference other states directly.
 
-The transition table is configured in `GameBootstrap` — the single place where the full game flow is visible:
+The transition table is configured in `GameFlowController` — the single place where the full game flow is visible:
 
 ```
 AddTransition(Init,    SceneValidated,  Playing)
@@ -96,9 +97,9 @@ Reset: Transitioning back to `Init` triggers `PlayingState.Exit()` (tear down sp
 - **Scene components** (MonoBehaviours): Thin scene presence. Hold serialized references, identify GameObjects for system discovery, no game logic. Examples: `HomeBaseComponent`, `CreepComponent`, `TurretComponent`, `SpawnPointComponent`. Throughout this document, "component" always refers to these MonoBehaviour scene markers — not simulation data.
 - **Stores** (plain C# classes): Authoritative owners of simulation data collections. Stores manage the lifecycle of their entities: add, mark for removal, flush deferred removals. Stores expose per-frame change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`) that consumers (presentation adapter, other stores) read without events. `GameSession` owns all stores and calls `BeginFrame()` at a known phase boundary. Examples: `CreepStore` (future: `TurretStore`, `ProjectileStore`).
 - **Simulation data** (plain C# classes): Per-entity game state held in stores. Positions, health, targets, economy balance, status effects. No Unity types (`Transform`, `GameObject`) in sim data. At this project's entity counts (tens of creeps, tens of turrets), classes are the pragmatic default — they avoid the copy-modify-write-back friction of mutable structs stored in collections. Reserve structs for small, immutable value types (e.g., `GridPosition`) or cases where cache locality measurably matters.
-- **Systems** (plain C# classes implementing `IGameSystem`): Own all game logic. Depend on stores for data access, not on other systems. Created by `GameBootstrap`, registered with `SystemScheduler` as an ordered array, ticked in deterministic order. Systems are global — they exist independently of game states. The state machine gates *when* systems tick, not *who* ticks them. Examples: `SpawnSystem`, `MovementSystem`, `PlacementSystem`, `ProjectileSystem`, `DamageSystem`, `EconomySystem`, `WaveSystem`.
+- **Systems** (plain C# classes implementing `IGameSystem`): Own all game logic. Depend on stores for data access, not on other systems. Created by `GameFlowController`, registered with `SystemScheduler` as an ordered array, ticked in deterministic order. Systems are global — they exist independently of game states. The state machine gates *when* systems tick, not *who* ticks them. Examples: `SpawnSystem`, `MovementSystem`, `PlacementSystem`, `ProjectileSystem`, `DamageSystem`, `EconomySystem`, `WaveSystem`.
 
-The system tick order is configured in `GameBootstrap` — the composition root is the single source of truth for both the transition table and the system execution order:
+The system tick order is configured in `GameFlowController` — the composition root is the single source of truth for both the transition table and the system execution order:
 
 ```
 var systemScheduler = new SystemScheduler(new IGameSystem[]
@@ -112,7 +113,7 @@ var systemScheduler = new SystemScheduler(new IGameSystem[]
 });
 ```
 
-`GameBootstrap.Update()` manages the per-frame lifecycle:
+`GameFlowController.Update()` manages the per-frame lifecycle:
 
 ```
 presentationAdapter.CollectInput();
@@ -200,27 +201,32 @@ Creeps and projectiles use pre-allocated object pools managed by the `Presentati
 
 ```
 Assets/Scripts/
-├── Core/               # GameBootstrap, GameSession, GameStateMachine, SystemScheduler, PresentationAdapter, states, enums, interfaces
-├── ObjectPooling/      # IPoolable, GameObjectPool (namespaced: ObjectPooling)
-├── HomeBase/           # HomeBaseComponent, BaseStore
-├── Creeps/             # CreepStore, CreepSimData, SpawnSystem, MovementSystem, SpawnPointComponent, CreepComponent
-├── Turrets/            # (Story 4+) TurretStore, TurretSimData, PlacementSystem, PlacementInput, TurretComponent
-├── Combat/             # DamageSystem, ProjectileSystem, ProjectileStore, ProjectileSimData, ProjectileHit, ProjectileComponent
-├── Economy/            # (Story 6+) EconomySystem
-├── Waves/              # (Story 9) WaveSystem
-├── Data/               # ScriptableObject definitions (CreepDef, SpawnConfig, TurretDef, WaveDef, EconomyConfig)
-└── UI/                 # UI Toolkit binding — BaseHealthHud (Story 3+), HUD controller
+├── App/                    # GameFlowController, GameSession, GameState, GameTrigger
+├── Framework/              # Reusable infrastructure
+│   ├── StateMachine/       # GameStateMachine, IGameState
+│   ├── Scheduling/         # SystemScheduler, IGameSystem
+│   └── Pooling/            # GameObjectPool, IPoolable (namespace: ObjectPooling)
+├── States/                 # InitState, PlayingState, LoseState
+├── Stores/                 # CreepStore, BaseStore, TurretStore, ProjectileStore
+├── SimData/                # CreepSimData, TurretSimData, ProjectileSimData, ProjectileHit
+├── Systems/                # SpawnSystem, MovementSystem, PlacementSystem, ProjectileSystem, DamageSystem
+├── Components/             # SpawnPointComponent, HomeBaseComponent, CreepComponent, TurretComponent, ProjectileComponent
+├── Input/                  # PlacementInput
+├── Presentation/           # PresentationAdapter, GameUiCoordinator, BaseHealthHud (.cs + UI Toolkit assets)
+├── Data/                   # ScriptableObject definitions (CreepDef, SpawnConfig, BaseConfig, TurretDef)
+├── Economy/                # (Story 6+)
+└── Waves/                  # (Story 9)
 ```
 
-No project-wide namespace. Feature folders group related components, systems, stores, and data. Generic reusable infrastructure (`ObjectPooling`) gets its own namespace.
+No project-wide namespace. Role-based folders group classes by architectural role. Generic reusable infrastructure (`ObjectPooling`) gets its own namespace.
 
 #### Extension Points
 
 - **New creep/turret variant** (same behavior, different stats): Add ScriptableObject definition asset → Addressables picks it up → existing systems process it. Data-only change.
 - **New creep/turret behavior** (e.g., a novel turret effect): Requires a new effect handler in the relevant system(s). Scope depends on how different the behavior is from existing types.
-- **New game state**: Implement `IGameState` → add to `GameState` enum → register with `GameStateMachine` → add transition rows in `GameBootstrap`.
-- **New trigger**: Add to `GameTrigger` enum → add transition rows in `GameBootstrap`. Existing states unchanged.
-- **New gameplay system**: Implement `IGameSystem` → add to `PlayingState` system array in `GameBootstrap` at the correct tick position.
+- **New game state**: Implement `IGameState` → add to `GameState` enum → register with `GameStateMachine` → add transition rows in `GameFlowController`.
+- **New trigger**: Add to `GameTrigger` enum → add transition rows in `GameFlowController`. Existing states unchanged.
+- **New gameplay system**: Implement `IGameSystem` → add to `PlayingState` system array in `GameFlowController` at the correct tick position.
 
 ---
 
@@ -283,7 +289,7 @@ The spec emphasizes making gameplay values "easy to tweak and tune." All gamepla
 ### Asset Loading
 
 - **ScriptableObject assets**: Direct serialized field references for now. Addressables when extensibility is needed (Story 8+, multiple creep/turret types loaded dynamically).
-- **Visual prefabs**: Direct serialized field references on `GameBootstrap`.
+- **Visual prefabs**: Direct serialized field references on `GameFlowController`.
 - **No `Resources/` folder**: All assets via direct references or Addressables.
 
 ---

@@ -23,6 +23,17 @@ At the start of each session, check for and read the following files if they exi
 | Enums | PascalCase type and values | `enum CreepType { Small, Big }` |
 | Interfaces | I-prefix, PascalCase | `IDamageable`, `IPoolable` |
 
+### Class Suffix Taxonomy
+
+| Suffix | Role | Example |
+|--------|------|---------|
+| `Controller` | Owns flow orchestration (composition, game loop) | `GameFlowController` |
+| `Coordinator` | Orchestrates subsystems in response to events | `GameUiCoordinator` |
+| `Adapter` | Bridges two architectural layers | `PresentationAdapter` |
+| `System` | Game logic, implements `IGameSystem` | `DamageSystem` |
+| `Store` | Authoritative data owner with lifecycle | `CreepStore` |
+| `State` | Game state implementation (`IGameState`) | `PlayingState` |
+
 ### Method Naming by Intent
 
 Methods fall into two categories based on their intent:

@@ -1,5 +1,6 @@
 using UnityEngine;
 
+// Inspector-tunable creep stats: speed, damage, health. One asset per creep type.
 [CreateAssetMenu(fileName = "NewCreepDef", menuName = "Game/Creep Definition")]
 public class CreepDef : ScriptableObject
 {

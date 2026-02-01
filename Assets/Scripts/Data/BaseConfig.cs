@@ -1,5 +1,6 @@
 using UnityEngine;
 
+// Inspector-tunable base health. Systems receive extracted primitives, never this reference.
 [CreateAssetMenu(fileName = "NewBaseConfig", menuName = "Game/Base Config")]
 public class BaseConfig : ScriptableObject
 {

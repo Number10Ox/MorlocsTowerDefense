@@ -8,7 +8,7 @@ Visual companion to TDD.md Section 2 (Detailed Design). Render with any Mermaid-
 
 ```mermaid
 classDiagram
-    class GameBootstrap {
+    class GameFlowController {
         <<MonoBehaviour>>
         -GameStateMachine stateMachine
         -SystemScheduler systemScheduler
@@ -90,10 +90,10 @@ classDiagram
         +SyncVisuals()
     }
 
-    GameBootstrap --> GameStateMachine : owns
-    GameBootstrap --> SystemScheduler : owns
-    GameBootstrap --> PresentationAdapter : owns
-    GameBootstrap --> HomeBaseComponent : serialized ref
+    GameFlowController --> GameStateMachine : owns
+    GameFlowController --> SystemScheduler : owns
+    GameFlowController --> PresentationAdapter : owns
+    GameFlowController --> HomeBaseComponent : serialized ref
     GameStateMachine --> "0..*" IGameState : manages
     GameStateMachine --> GameState : indexes by
     GameStateMachine --> GameTrigger : transitions by
@@ -103,14 +103,14 @@ classDiagram
 ```
 
 **Notes:**
-- `GameBootstrap` is the only "god-level" MonoBehaviour. It is the composition root — creates the state machine, system scheduler, states, and systems. Configures the transition table and wires references.
+- `GameFlowController` is the composition root MonoBehaviour. It creates the state machine, system scheduler, states, systems, and `GameUiCoordinator`. Configures the transition table and wires references.
 - `GameStateMachine` and all `IGameState` implementations are **plain C# classes**, not MonoBehaviours.
 - `HomeBaseComponent` is a thin MonoBehaviour on the Base GameObject in the scene. It holds no logic — just identifies the object for system discovery.
-- States receive an `Action<GameTrigger>` delegate at construction. They fire semantic triggers (`SceneValidated`, `BaseDestroyed`, etc.) without knowing which state the trigger leads to. The transition table in `GameBootstrap` maps `(state, trigger) → destination`.
+- States receive an `Action<GameTrigger>` delegate at construction. They fire semantic triggers (`SceneValidated`, `BaseDestroyed`, etc.) without knowing which state the trigger leads to. The transition table in `GameFlowController` maps `(state, trigger) → destination`.
 - **States are flow-only** — they manage enter/exit lifecycle and fire triggers. States do not own or tick systems.
-- `SystemScheduler` is a **plain C# class** owned by `GameBootstrap`. It holds the ordered `IGameSystem[]` array and ticks them sequentially. `GameBootstrap.Update()` gates the scheduler — systems only tick when the state machine is in a gameplay state (e.g., `Playing`). This separates flow control (states) from system execution (scheduler).
+- `SystemScheduler` is a **plain C# class** owned by `GameFlowController`. It holds the ordered `IGameSystem[]` array and ticks them sequentially. `GameFlowController.Update()` gates the scheduler — systems only tick when the state machine is in a gameplay state (e.g., `Playing`). This separates flow control (states) from system execution (scheduler).
 - `IGameSystem` provides a uniform `Tick()` contract for gameplay systems. Systems are global — they exist independently of game states.
-- `PresentationAdapter` is a **plain C# class** owned by `GameBootstrap`. It is the only place that calls Unity input and rendering APIs. Systems never reference it directly — they read input structs it produces and write sim data it consumes. Stub in Story 1; gains responsibilities as systems are added.
+- `PresentationAdapter` is a **plain C# class** owned by `GameFlowController`. It is the only place that calls Unity input and rendering APIs. Systems never reference it directly — they read input structs it produces and write sim data it consumes. Stub in Story 1; gains responsibilities as systems are added.
 - `Win` and `Lose` states appear in the enum but are implemented in later stories.
 - `GameTrigger` values are added incrementally as stories introduce new transitions.
 
@@ -137,7 +137,7 @@ stateDiagram-v2
 
     state Playing {
         [*] --> GameplayActive
-        Note right of GameplayActive : Systems ticked by SystemScheduler (gated by GameBootstrap)
+        Note right of GameplayActive : Systems ticked by SystemScheduler (gated by GameFlowController)
     }
 ```
 
@@ -152,7 +152,7 @@ stateDiagram-v2
 ```mermaid
 sequenceDiagram
     participant Unity
-    participant Bootstrap as GameBootstrap
+    participant Bootstrap as GameFlowController
     participant SM as GameStateMachine
     participant Sched as SystemScheduler
     participant Init as InitState
@@ -195,11 +195,11 @@ sequenceDiagram
 ```
 
 **Key points:**
-- `GameBootstrap.Awake()` constructs everything — state machine, system scheduler, states — and configures the transition table. `Start()` kicks off the state machine.
+- `GameFlowController.Awake()` constructs everything — state machine, system scheduler, states — and configures the transition table. `Start()` kicks off the state machine.
 - `InitState.Enter()` fires `SceneValidated` — it does not know the destination. The trigger is **pending** — not resolved until the next `Tick()`.
 - The state machine resolves triggers at the **start** of `Tick()`: lookup `(currentState, trigger)` in transition table → `Exit()` old → switch → `Enter()` new → `Tick()` new. This guarantees one clean frame boundary between states.
 - States only depend on `Action<GameTrigger>` — no reference to other states or to `GameStateMachine` itself. This makes states independently testable.
-- System ticking is separate from state ticking. `GameBootstrap` gates the scheduler based on the current state — systems only run during gameplay.
+- System ticking is separate from state ticking. `GameFlowController` gates the scheduler based on the current state — systems only run during gameplay.
 
 ---
 
@@ -208,7 +208,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant Unity
-    participant Bootstrap as GameBootstrap
+    participant Bootstrap as GameFlowController
     participant Pres as PresentationAdapter
     participant SM as GameStateMachine
     participant State as Current IGameState
@@ -244,16 +244,16 @@ sequenceDiagram
 **Frame boundary contract:** Each frame has four phases with unidirectional data flow:
 1. **Input collection** — `PresentationAdapter.CollectInput()` reads Unity inputs (mouse position, raycasts, keyboard) and writes them into sim-readable input structs. Systems never call Unity input APIs directly.
 2. **State tick** — The state machine resolves pending triggers and ticks the current state. States manage flow (enter/exit, fire triggers) — not system execution.
-3. **System tick** — `GameBootstrap` gates the `SystemScheduler` based on the current state. Systems tick in deterministic phase order. Systems read/write only simulation data (structs, arrays). No Unity API calls.
+3. **System tick** — `GameFlowController` gates the `SystemScheduler` based on the current state. Systems tick in deterministic phase order. Systems read/write only simulation data (structs, arrays). No Unity API calls.
 4. **Visual sync** — `PresentationAdapter.SyncVisuals()` reads simulation state and writes to Unity objects (`Transform.position`, enable/disable GameObjects, UI updates). The sim is unaware this step exists.
 
-**Story 1:** The `SystemScheduler` holds an empty `IGameSystem[]` array — no systems yet. The presentation adapter is a stub. Future stories add systems to the scheduler in `GameBootstrap`.
+**Story 1:** The `SystemScheduler` holds an empty `IGameSystem[]` array — no systems yet. The presentation adapter is a stub. Future stories add systems to the scheduler in `GameFlowController`.
 
 ---
 
 ## System Scheduler — System Phases & Tick Order
 
-Shows how `IGameSystem` implementations will be ticked by `SystemScheduler` as stories are implemented. Systems are grouped into three conceptual phases. All systems are plain C# classes implementing `IGameSystem`, registered in order via `GameBootstrap`. The scheduler is gated by the state machine — systems only tick during gameplay states.
+Shows how `IGameSystem` implementations will be ticked by `SystemScheduler` as stories are implemented. Systems are grouped into three conceptual phases. All systems are plain C# classes implementing `IGameSystem`, registered in order via `GameFlowController`. The scheduler is gated by the state machine — systems only tick during gameplay states.
 
 ```mermaid
 flowchart TD
@@ -308,53 +308,63 @@ flowchart TD
 ```
 Assets/
 ├── Scripts/
-│   ├── Core/                   # Bootstrap, session, state machine, scheduler, game loop
-│   │   ├── GameBootstrap.cs
+│   ├── App/                      # Composition root, session, game state/trigger enums
+│   │   ├── GameFlowController.cs
 │   │   ├── GameSession.cs
-│   │   ├── GameStateMachine.cs
-│   │   ├── SystemScheduler.cs
-│   │   ├── PresentationAdapter.cs
-│   │   ├── GameState.cs        # enum
-│   │   ├── GameTrigger.cs      # enum
-│   │   ├── IGameState.cs       # interface
-│   │   ├── IGameSystem.cs      # interface
+│   │   ├── GameState.cs
+│   │   └── GameTrigger.cs
+│   ├── Framework/                # Reusable infrastructure
+│   │   ├── StateMachine/
+│   │   │   ├── GameStateMachine.cs
+│   │   │   └── IGameState.cs
+│   │   ├── Scheduling/
+│   │   │   ├── SystemScheduler.cs
+│   │   │   └── IGameSystem.cs
+│   │   └── Pooling/
+│   │       ├── IPoolable.cs
+│   │       └── GameObjectPool.cs
+│   ├── States/                   # IGameState implementations
 │   │   ├── InitState.cs
 │   │   ├── PlayingState.cs
 │   │   └── LoseState.cs
-│   ├── ObjectPooling/          # Reusable pool infrastructure (namespaced)
-│   │   ├── IPoolable.cs
-│   │   └── GameObjectPool.cs
-│   ├── HomeBase/               # Home base component and store
-│   │   ├── HomeBaseComponent.cs
-│   │   └── BaseStore.cs
-│   ├── Creeps/                 # Creep store, sim data, systems, components
+│   ├── Stores/                   # Authoritative data containers
 │   │   ├── CreepStore.cs
+│   │   ├── BaseStore.cs
+│   │   ├── TurretStore.cs
+│   │   └── ProjectileStore.cs
+│   ├── SimData/                  # Pure simulation data classes/structs
 │   │   ├── CreepSimData.cs
+│   │   ├── TurretSimData.cs
+│   │   ├── ProjectileSimData.cs
+│   │   └── ProjectileHit.cs
+│   ├── Systems/                  # IGameSystem implementations
 │   │   ├── SpawnSystem.cs
 │   │   ├── MovementSystem.cs
+│   │   ├── PlacementSystem.cs
+│   │   ├── ProjectileSystem.cs
+│   │   └── DamageSystem.cs
+│   ├── Components/               # Thin MonoBehaviour prefab hooks
+│   │   ├── HomeBaseComponent.cs
 │   │   ├── SpawnPointComponent.cs
-│   │   └── CreepComponent.cs
-│   ├── Data/                   # ScriptableObject definitions
+│   │   ├── CreepComponent.cs
+│   │   ├── TurretComponent.cs
+│   │   └── ProjectileComponent.cs
+│   ├── Input/                    # Sim-readable input bridges
+│   │   └── PlacementInput.cs
+│   ├── Presentation/             # Unity view sync, UI bindings, coordinators
+│   │   ├── PresentationAdapter.cs
+│   │   ├── GameUiCoordinator.cs
+│   │   ├── BaseHealthHud.cs
+│   │   ├── BaseHealthHud.uss
+│   │   ├── BaseHealthHud.uxml
+│   │   └── DefaultPanel Settings.asset
+│   ├── Data/                     # ScriptableObject definitions
 │   │   ├── CreepDef.cs
 │   │   ├── SpawnConfig.cs
 │   │   ├── BaseConfig.cs
 │   │   └── TurretDef.cs
-│   ├── Turrets/                # Turret store, sim data, placement system, input, component
-│   │   ├── TurretStore.cs
-│   │   ├── TurretSimData.cs
-│   │   ├── PlacementSystem.cs
-│   │   ├── PlacementInput.cs
-│   │   └── TurretComponent.cs
-│   ├── Combat/                 # DamageSystem, ProjectileSystem, ProjectileStore
-│   │   ├── DamageSystem.cs
-│   │   ├── ProjectileSystem.cs
-│   │   ├── ProjectileStore.cs
-│   │   ├── ProjectileSimData.cs
-│   │   ├── ProjectileHit.cs
-│   │   └── ProjectileComponent.cs
-│   ├── Economy/                # (Story 6+)
-│   ├── Waves/                  # (Story 9)
-│   └── UI/                     # BaseHealthHud (Story 3+)
+│   ├── Economy/                  # (Story 6+)
+│   └── Waves/                    # (Story 9)
 ├── Tests/
 │   ├── Editor/
 │   │   ├── EditModeTests.asmdef
@@ -376,16 +386,17 @@ Assets/
 │   │   ├── TurretPlacementIntegrationTests.cs
 │   │   ├── ProjectileStoreTests.cs
 │   │   ├── ProjectileSystemTests.cs
-│   │   └── TurretShootingIntegrationTests.cs
+│   │   ├── TurretShootingIntegrationTests.cs
+│   │   └── GameUiCoordinatorTests.cs
 │   └── Runtime/
 │       └── RuntimeTests.asmdef
-├── Prefabs/                    # (provided, unchanged)
-├── Scenes/                     # (provided, unchanged)
-├── Materials/                  # (provided, unchanged)
-└── Terrain/                    # (provided, unchanged)
+├── Prefabs/
+├── Scenes/
+├── Materials/
+└── Terrain/
 ```
 
-No project-wide namespace. Feature folders group related components, systems, stores, and data. Generic reusable infrastructure (`ObjectPooling`) gets its own namespace.
+No project-wide namespace. Role-based folders group classes by architectural role. Generic reusable infrastructure (`ObjectPooling`) gets its own namespace.
 
 ---
 
@@ -477,7 +488,7 @@ classDiagram
     CreepComponent ..|> IPoolable
     PresentationAdapter --> CreepStore : reads change lists
     PresentationAdapter --> GameObjectPool : manages creep GOs
-    GameBootstrap --> GameSession : owns
+    GameFlowController --> GameSession : owns
 ```
 
 **Notes:**
@@ -490,7 +501,7 @@ classDiagram
 
 ```mermaid
 sequenceDiagram
-    participant Bootstrap as GameBootstrap
+    participant Bootstrap as GameFlowController
     participant Session as GameSession
     participant Store as CreepStore
     participant Spawn as SpawnSystem
@@ -606,22 +617,23 @@ classDiagram
     LoseState ..|> IGameState
     PlayingState --> BaseStore : reads IsDestroyed
     BaseHealthHud ..> BaseStore : listens OnBaseHealthChanged
-    GameBootstrap --> BaseConfig : serialized ref
-    GameBootstrap --> BaseHealthHud : owns
+    GameFlowController --> BaseConfig : serialized ref
+    GameFlowController --> GameUiCoordinator : owns
+    GameUiCoordinator --> BaseHealthHud : optional
 ```
 
 **Notes:**
 - `DamageSystem` reads `CreepStore.ActiveCreeps` and writes `BaseStore` via `ApplyDamage()`. Gates on `ReachedBase && !HasDealtBaseDamage` to prevent double-damage.
 - `BaseStore` fires `OnBaseHealthChanged` for UI updates. `ApplyDamage` is idempotent after destruction (no event, no state change once health is 0).
 - `PlayingState` polls `BaseStore.IsDestroyed` in `Tick()` — not event-driven — because event handlers must not fire game triggers per the event handler discipline.
-- `LoseState` is empty; `GameBootstrap.OnStateChanged` toggles the LosePopup as a presentation concern.
+- `LoseState` is empty; `GameUiCoordinator.OnStateChanged` toggles the LosePopup as a presentation concern.
 - `BaseHealthHud` is a plain C# class (not MonoBehaviour) that binds to a `UIDocument` and updates via `OnBaseHealthChanged` event.
 
 ### Base Damage Sequence
 
 ```mermaid
 sequenceDiagram
-    participant Bootstrap as GameBootstrap
+    participant Bootstrap as GameFlowController
     participant Session as GameSession
     participant CStore as CreepStore
     participant BStore as BaseStore
@@ -681,7 +693,7 @@ sequenceDiagram
 - **Frame N**: MovementSystem sets `ReachedBase`, DamageSystem applies damage, HUD updates via event.
 - **Frame N+1**: `PlayingState.Tick()` detects `IsDestroyed`, fires `BaseDestroyed` (pending trigger).
 - **Frame N+2**: State machine resolves trigger, transitions to Lose, popup appears.
-- Systems do not tick in Lose state (gated by `CurrentStateId == Playing` in `GameBootstrap.Update()`).
+- Systems do not tick in Lose state (gated by `CurrentStateId == Playing` in `GameFlowController.Update()`).
 
 ---
 
@@ -738,11 +750,11 @@ classDiagram
     PresentationAdapter --> TurretStore : reads PlacedThisFrame
     PresentationAdapter --> PlacementInput : writes in CollectInput()
     PresentationAdapter --> GameObjectPool : manages turret GOs
-    GameBootstrap --> PlacementInput : creates and passes to both sides
+    GameFlowController --> PlacementInput : creates and passes to both sides
 ```
 
 **Notes:**
-- `PlacementInput` is a shared object created by `GameBootstrap` and passed to both `PresentationAdapter` (writer) and `PlacementSystem` (reader). Neither depends on the other.
+- `PlacementInput` is a shared object created by `GameFlowController` and passed to both `PresentationAdapter` (writer) and `PlacementSystem` (reader). Neither depends on the other.
 - `TurretStore` is minimal for Story 4: no removal pipeline. `BeginFrame()` clears `PlacedThisFrame`. `Reset()` clears everything.
 - `PlacementSystem` clears `PlacementInput` after consuming to prevent double-placement if execution order changes.
 - `TurretComponent` follows `CreepComponent` pattern: thin MonoBehaviour + `IPoolable`, no logic.
@@ -752,7 +764,7 @@ classDiagram
 ```mermaid
 sequenceDiagram
     participant Unity
-    participant Bootstrap as GameBootstrap
+    participant Bootstrap as GameFlowController
     participant Pres as PresentationAdapter
     participant Input as PlacementInput
     participant Session as GameSession
@@ -917,7 +929,7 @@ classDiagram
     ProjectileComponent ..|> IPoolable
     PresentationAdapter --> ProjectileStore : reads change lists
     PresentationAdapter --> GameObjectPool : manages projectile GOs
-    GameBootstrap --> TurretDef : serialized ref
+    GameFlowController --> TurretDef : serialized ref
 ```
 
 **Notes:**
@@ -932,7 +944,7 @@ classDiagram
 
 ```mermaid
 sequenceDiagram
-    participant Bootstrap as GameBootstrap
+    participant Bootstrap as GameFlowController
     participant Session as GameSession
     participant CStore as CreepStore
     participant TStore as TurretStore
