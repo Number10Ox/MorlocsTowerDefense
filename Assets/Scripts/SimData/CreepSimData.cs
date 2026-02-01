@@ -13,6 +13,8 @@ public sealed class CreepSimData
     public int Health;
     public int MaxHealth;
     public int CoinReward;
+    public float SlowRemainingTime;
+    public float SlowMultiplier;
 
     public CreepSimData(int id)
     {

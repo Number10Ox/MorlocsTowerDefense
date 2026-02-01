@@ -47,8 +47,8 @@ GameFlowController.Update() → GameStateMachine.Tick() → GameSession.BeginFra
 | Class | Type | Responsibility |
 |-------|------|---------------|
 | `GameFlowController` | MonoBehaviour | Composition root. Creates GameSession, state machine, states, system scheduler, systems, and presentation adapter. Configures transition table. Drives game loop via `Update()`. Gates system ticking by current state. Calls `GameSession.BeginFrame()` before system tick. |
-| `GameUiCoordinator` | Plain C# | State-driven presentation decisions: popup lifecycle, HUD visibility, health and coin event forwarding. Subscribes to `GameStateMachine.OnStateChanged`, `BaseStore.OnBaseHealthChanged`, and `EconomyStore.OnCoinsChanged`. No simulation writes. Constructed by `GameFlowController`, torn down in `OnDestroy`. |
-| `GameSession` | Plain C# | Per-run session. Owns all stores (CreepStore, BaseStore, TurretStore, ProjectileStore, EconomyStore). `BeginFrame()` flushes deferred store operations and clears per-frame change lists. `Reset()` resets all stores for game restart. Discarded and recreated on restart. |
+| `GameUiCoordinator` | Plain C# | State-driven presentation decisions: popup lifecycle, HUD visibility, health/coin/turret-selection event forwarding. Subscribes to `GameStateMachine.OnStateChanged`, `BaseStore.OnBaseHealthChanged`, `EconomyStore.OnCoinsChanged`, and `TurretSelectionStore.OnSelectionChanged`. No simulation writes. Constructed by `GameFlowController`, torn down in `OnDestroy`. |
+| `GameSession` | Plain C# | Per-run session. Owns all stores (CreepStore, BaseStore, TurretStore, ProjectileStore, EconomyStore, TurretSelectionStore). Constructor takes `defaultTurretType` for `TurretSelectionStore`. `BeginFrame()` flushes deferred store operations and clears per-frame change lists. `Reset()` resets all stores for game restart. Discarded and recreated on restart. |
 | `GameStateMachine` | Plain C# | Owns state registry and transition table. Resolves triggers to transitions. Fires `OnStateChanged` event. Processes pending triggers at tick start. |
 | `GameState` | Enum | State identifiers: `Init`, `Playing`, `Win`, `Lose`. |
 | `GameTrigger` | Enum | Semantic transition triggers: `SceneValidated`, `BaseDestroyed`, `AllWavesCleared`, `RestartRequested`. |
@@ -61,17 +61,23 @@ GameFlowController.Update() → GameStateMachine.Tick() → GameSession.BeginFra
 | `CreepStore` | Plain C# | Authoritative owner of the creep collection. `Add()`, `MarkForRemoval()`, `BeginFrame()` (flush removals, clear frame lists). Exposes `ActiveCreeps`, `SpawnedThisFrame`, `RemovedIdsThisFrame`. |
 | `SpawnSystem` | Plain C# : `IGameSystem` | Spawn timer. Creates `CreepSimData` entries via `CreepStore.Add()`. Depends on `CreepStore`, not on other systems. |
 | `MovementSystem` | Plain C# : `IGameSystem` | Advances creep positions toward base. Detects arrival, sets `ReachedBase = true`, and calls `CreepStore.MarkForRemoval()`. Depends on `CreepStore`, not on other systems. |
-| `DamageSystem` | Plain C# : `IGameSystem` | Two-phase damage processing. `ProcessProjectileHits()`: reads `ProjectileStore.HitsThisFrame`, applies damage to creeps (clamped to 0), marks dead creeps for removal, fires `OnCreepKilled(creepId, coinReward)` event. `ProcessBaseDamage()`: iterates `ActiveCreeps`, applies `BaseStore.ApplyDamage()` for each with `ReachedBase && !HasDealtBaseDamage && Health > 0`, sets `HasDealtBaseDamage = true`. Dead-creep guard prevents killed creeps from dealing base damage. |
+| `DamageSystem` | Plain C# : `IGameSystem` | Three-phase damage processing. `TickSlowEffects(dt)`: decrements `SlowRemainingTime` on all alive creeps, clamps to zero. `ProcessProjectileHits()`: reads `ProjectileStore.HitsThisFrame`, applies damage to creeps (clamped to 0), marks dead creeps for removal, fires `OnCreepKilled(creepId, coinReward)` event; if creep survives and hit carries `SlowDuration > 0`, applies slow effect (`SlowRemainingTime = hit.SlowDuration, SlowMultiplier = hit.SlowMultiplier`). `ProcessBaseDamage()`: iterates `ActiveCreeps`, applies `BaseStore.ApplyDamage()` for each with `ReachedBase && !HasDealtBaseDamage && Health > 0`, sets `HasDealtBaseDamage = true`. Dead-creep guard prevents killed creeps from dealing base damage. |
 | `ProjectileSystem` | Plain C# : `IGameSystem` | Turret firing (with inline target selection), projectile movement, and hit detection. `UpdateFireTimers()`: decrements cooldowns, finds nearest alive creep in range via sqrMagnitude scan, spawns homing projectile. `MoveProjectiles()`: advances projectiles toward target, records hits via `ProjectileStore.RecordHit()`, discards projectiles whose target is dead/removed. |
 | `ProjectileStore` | Plain C# | Authoritative owner of the projectile collection. Mirrors `CreepStore` with deferred removal: `Add()`, `MarkForRemoval()`, `BeginFrame()`. Exposes `ActiveProjectiles`, `SpawnedThisFrame`, `RemovedIdsThisFrame`. Additionally: `HitsThisFrame` list + `RecordHit(ProjectileHit)` for cross-system hit communication. |
 | `BaseStore` | Plain C# | Authoritative owner of base health. `ApplyDamage(int)` — idempotent after destruction (no event, no state change). `BeginFrame()` clears `DamageTakenThisFrame`. `Reset()` restores to max health. Fires `OnBaseHealthChanged` event for UI. |
 | `EconomyStore` | Plain C# | Authoritative owner of coin balance. `AddCoins(int)` increments and fires `OnCoinsChanged`. `TrySpendCoins(int)` atomically checks and deducts (returns false if insufficient). `CanAfford(int)` read-only check. `BeginFrame()` clears per-frame counters. `Reset()` restores to starting coins. Single writer: `EconomySystem`. |
-| `EconomySystem` | Plain C# : `IGameSystem` | Phase 3 resolution. Subscribes to `DamageSystem.OnCreepKilled` — buffers rewards locally (handler discipline). `Tick()` applies buffered credits via `EconomyStore.AddCoins`, reads `TurretStore.PlacedThisFrame` to deduct costs via `EconomyStore.TrySpendCoins`. No CreepStore dependency. |
+| `EconomySystem` | Plain C# : `IGameSystem` | Phase 3 resolution. Subscribes to `DamageSystem.OnCreepKilled` — buffers rewards locally (handler discipline). `Tick()` applies buffered credits via `EconomyStore.AddCoins`, reads `TurretStore.PlacedThisFrame` and looks up per-type cost from `IReadOnlyDictionary<TurretType, TurretTypeStats> statsByType` to deduct via `EconomyStore.TrySpendCoins`. No CreepStore dependency. |
+| `TurretSelectionStore` | Plain C# | Authoritative owner of the currently selected turret type. Constructor takes `TurretType defaultType`. `SelectType(TurretType)` fires `OnSelectionChanged` event only on change. `Reset()` restores to the default type passed at construction. Writer: `PresentationAdapter` (CollectInput, keyboard). Readers: `PlacementSystem`, `GameUiCoordinator`. |
+| `TurretTypeStats` | Readonly struct | Per-turret-type combat and economy stats. Built once at bootstrap by `TurretTypeDirectoryBuilder.TryBuild()` from `TurretDefinitions` entries. Single source of truth: passed as `IReadOnlyDictionary<TurretType, TurretTypeStats>` to `PlacementSystem` and `EconomySystem`, as `TurretTypeStats[]` to `TurretSelectionHud`. Fields: Type, Range, FireInterval, Damage, ProjectileSpeed, Cost, SlowDuration, SlowMultiplier. |
+| `TurretDefinitions` | ScriptableObject | Inspector-editable table of turret definitions (`[CreateAssetMenu(fileName = "TurretDefinitions", menuName = "Game/Turret Definitions")]`). Contains `TurretTypeDefinition[]` entries where order determines default type (`[0]`), keyboard shortcuts (1-9), and HUD layout. `OnValidate()` sanitizes entries respecting struct copy semantics and detects duplicate `TurretType` entries. |
+| `TurretTypeDirectoryBuilder` | Static helper | Pure C# builder. `TryBuild(TurretTypeDefinition[], out TurretTypeDirectory, out string)` locally copies and validates each entry, builds the immutable `TurretTypeDirectory` result object. Fail-fast on null prefabs or duplicate types with index+type in error messages. Keeps `GameFlowController.Awake()` clean and makes catalog validation unit-testable. |
+| `TurretTypeDirectory` | Plain C# (immutable) | Immutable result object built by `TurretTypeDirectoryBuilder.TryBuild()`. Properties: `OrderedTypes`, `OrderedStats`, `StatsByType`, `PrefabsByType`, `DefaultType`. Passed to systems and presentation at bootstrap. |
 | `CoinHud` | Plain C# | Stateless view for coin display. Queries `coin-label` and `coin-container` from shared `UIDocument`. `UpdateCoins(int)` sets label text. `SetVisible(bool)` toggles display. |
+| `TurretSelectionHud` | Plain C# | Data-driven view for turret selection display. Dynamically generates option elements from `TurretTypeStats[]` into an inner `turret-options` container in the shared `UIDocument`. Keyboard shortcuts [1]-[9] shown based on array order. `UpdateSelection(TurretType)` toggles `turret-option--selected` class. `SetVisible(bool)` toggles container display. Constructor takes `TurretType initialSelection`. |
 | `HomeBaseComponent` | MonoBehaviour | Thin component on Base GameObject. Identifies the base for system discovery. |
 | `SpawnPointComponent` | MonoBehaviour | Thin component on SpawnPoint GameObjects. Identifies spawn positions for bootstrap discovery. |
 | `CreepComponent` | MonoBehaviour + `IPoolable` | Thin component on creep prefab instances. Holds `CreepId` for sim-to-GO mapping. Pool lifecycle: activate on get, deactivate on return. |
-| `PresentationAdapter` | Plain C# | Reads store change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`) to manage creep GameObjects via object pool. Updates `Transform.position` from sim data. |
+| `PresentationAdapter` | Plain C# | Reads store change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`) to manage creep GameObjects via object pool. Updates `Transform.position` from sim data. Manages turret pools via `IReadOnlyDictionary<TurretType, GameObjectPool>`. Data-driven keyboard input: maps digit keys 1-9 to `TurretType[]` turret type order from catalog. |
 
 #### Game State Machine
 
@@ -138,7 +144,7 @@ Systems operate on stores — not on MonoBehaviour references directly. Stores o
 - C# `event Action<T>` for system-to-system and system-to-UI communication
 - `?.Invoke()` for safe invocation
 - Events are notifications, not commands — receivers do not mutate the sender's state
-- Key events: `OnStateChanged`, `OnCreepKilled`, `OnCoinsChanged`, `OnBaseHealthChanged`, `OnWaveStarted`, `OnWaveCleared`
+- Key events: `OnStateChanged`, `OnCreepKilled`, `OnCoinsChanged`, `OnBaseHealthChanged`, `OnSelectionChanged`, `OnWaveStarted`, `OnWaveCleared`
 
 **Ordering & reentrancy policy:**
 
@@ -174,16 +180,21 @@ Stores themselves provide lifecycle operations (`Add`, `MarkForRemoval`, `BeginF
 | Creep health | CreepStore (field: Health) | DamageSystem | ProjectileSystem, MovementSystem, PresentationAdapter |
 | Creep max health | CreepStore (field: MaxHealth) | SpawnSystem (at creation) | PresentationAdapter |
 | Turret placement & positions | TurretStore (field: Position) | PlacementSystem | ProjectileSystem, PresentationAdapter |
+| Turret type | TurretStore (field: Type) | PlacementSystem (at creation) | ProjectileSystem, EconomySystem, PresentationAdapter |
 | Turret combat stats | TurretStore (fields: Range, FireInterval, Damage, ProjectileSpeed) | PlacementSystem (at creation) | ProjectileSystem |
+| Turret slow params | TurretStore (fields: SlowDuration, SlowMultiplier) | PlacementSystem (at creation) | ProjectileSystem |
 | Turret fire cooldown | TurretStore (field: FireCooldown) | ProjectileSystem | — |
 | Projectile positions & state | ProjectileStore (fields: Position, TargetCreepId, Damage, Speed) | ProjectileSystem | PresentationAdapter |
+| Projectile slow params | ProjectileStore (fields: SlowDuration, SlowMultiplier) | ProjectileSystem (at creation) | DamageSystem (via ProjectileHit) |
 | Projectile hits per frame | ProjectileStore (HitsThisFrame) | ProjectileSystem (RecordHit) | DamageSystem |
 | Creep coin reward | CreepStore (field: CoinReward) | SpawnSystem (at creation) | DamageSystem (passes through OnCreepKilled event) |
 | Base health | BaseStore (field: CurrentHealth) | DamageSystem | PlayingState (end condition), BaseHealthHud |
 | Coin balance | EconomyStore (field: CurrentCoins) | EconomySystem | PlacementSystem (affordability via CanAfford), CoinHud (via OnCoinsChanged) |
 | Wave progress | (Future: WaveStore) | WaveSystem | PlayingState (end condition), PresentationAdapter |
 | Player input (placement) | PlacementInput | PresentationAdapter (CollectInput) | PlacementSystem |
-| Active status effects (slow, etc.) | CreepStore (field: effects) | DamageSystem | MovementSystem |
+| Selected turret type | TurretSelectionStore (field: SelectedType) | PresentationAdapter (CollectInput, keyboard) | PlacementSystem, GameUiCoordinator |
+| Creep slow remaining time | CreepStore (field: SlowRemainingTime) | DamageSystem | MovementSystem |
+| Creep slow multiplier | CreepStore (field: SlowMultiplier) | DamageSystem | MovementSystem |
 
 Cross-system communication happens through the deterministic tick order and store change lists, not through event-driven mutation. Systems write to stores during their `Tick()`. Stores buffer deferred operations (e.g., `MarkForRemoval`) and expose per-frame change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`). `GameSession.BeginFrame()` flushes deferred operations at a known phase boundary, before systems tick. This guarantees that system execution order determines when state changes take effect.
 
@@ -195,7 +206,9 @@ These contracts document deliberate frame-timing behaviors that arise from the d
 
 **One-placement-per-frame invariant:** At most one turret can be placed per frame. `PresentationAdapter.CollectInput()` runs before systems tick and writes a single placement request (or none) into `PlacementInput`. `PlacementSystem` reads and clears `PlacementInput` during its tick. Even if the player clicks rapidly, Unity delivers at most one click event per `Update()` frame, and `CollectInput()` overwrites any prior value. This invariant simplifies `EconomySystem`'s deduction logic: `PlacedThisFrame.Count` is always 0 or 1, and a single `TrySpendCoins(turretCost)` call per placement suffices.
 
-**Status effect pattern (Story 7):** The freezing turret introduces a cross-system concern — DamageSystem applies a slow effect, but MovementSystem owns creep velocity. To preserve single-writer discipline: DamageSystem writes status effect records (effect type, duration, remaining time) to a per-creep status effect field in CreepStore. MovementSystem reads those records during its tick and adjusts speed accordingly. DamageSystem never writes to velocity; MovementSystem never writes to status effects. The phase ordering guarantees that Combat (Phase 2) writes effects before the next frame's World Update (Phase 1) reads them.
+**Status effect pattern (Story 7):** The freezing turret introduces a cross-system concern — DamageSystem applies a slow effect, but MovementSystem owns creep velocity. To preserve single-writer discipline: DamageSystem writes `CreepSimData.SlowRemainingTime` and `SlowMultiplier` fields. MovementSystem reads those fields during its tick and computes effective speed as `Speed * (SlowRemainingTime > 0 ? SlowMultiplier : 1)`. DamageSystem never writes to velocity; MovementSystem never writes to status effects. The phase ordering guarantees that Combat (Phase 2) writes effects before the next frame's World Update (Phase 1) reads them.
+
+**Slow timer semantics:** DamageSystem's `TickSlowEffects(dt)` decrements `SlowRemainingTime` before `ProcessProjectileHits()` applies new slows. MovementSystem reads `SlowRemainingTime` in Phase 1 before DamageSystem decrements it in Phase 2. The effective slow duration is therefore `[duration, duration + deltaTime]` — movement sees the pre-decrement value. This is acceptable for a tower defense and consistent with the next-frame visibility model. Tests assert with tolerance rather than exact frame counts.
 
 #### MVU UI Boundaries
 
@@ -213,19 +226,19 @@ Creeps and projectiles use pre-allocated object pools managed by the `Presentati
 
 ```
 Assets/Scripts/
-├── App/                    # GameFlowController, GameSession, GameState, GameTrigger
+├── App/                    # GameFlowController, GameSession, GameState, GameTrigger, TurretTypeDirectoryBuilder, TurretTypeDirectory
 ├── Framework/              # Reusable infrastructure
 │   ├── StateMachine/       # GameStateMachine, IGameState
 │   ├── Scheduling/         # SystemScheduler, IGameSystem
 │   └── Pooling/            # GameObjectPool, IPoolable (namespace: ObjectPooling)
 ├── States/                 # InitState, PlayingState, LoseState
-├── Stores/                 # CreepStore, BaseStore, TurretStore, ProjectileStore, EconomyStore
-├── SimData/                # CreepSimData, TurretSimData, ProjectileSimData, ProjectileHit
+├── Stores/                 # CreepStore, BaseStore, TurretStore, ProjectileStore, EconomyStore, TurretSelectionStore
+├── SimData/                # CreepSimData, TurretSimData, ProjectileSimData, ProjectileHit, TurretType, TurretTypeStats
 ├── Systems/                # SpawnSystem, MovementSystem, PlacementSystem, ProjectileSystem, DamageSystem, EconomySystem
 ├── Components/             # SpawnPointComponent, HomeBaseComponent, CreepComponent, TurretComponent, ProjectileComponent
 ├── Input/                  # PlacementInput
-├── Presentation/           # PresentationAdapter, GameUiCoordinator, BaseHealthHud, CoinHud (.cs + UI Toolkit assets)
-├── Data/                   # ScriptableObject definitions (CreepDef, SpawnConfig, BaseConfig, TurretDef, EconomyConfig)
+├── Presentation/           # PresentationAdapter, GameUiCoordinator, BaseHealthHud, CoinHud, TurretSelectionHud (.cs + UI Toolkit assets)
+├── Data/                   # ScriptableObject definitions (CreepDef, SpawnConfig, BaseConfig, TurretTypeDefinition, TurretDefinitions, EconomyConfig)
 └── Waves/                  # (Story 9)
 ```
 
@@ -233,8 +246,9 @@ No project-wide namespace. Role-based folders group classes by architectural rol
 
 #### Extension Points
 
-- **New creep/turret variant** (same behavior, different stats): Add ScriptableObject definition asset → Addressables picks it up → existing systems process it. Data-only change.
-- **New creep/turret behavior** (e.g., a novel turret effect): Requires a new effect handler in the relevant system(s). Scope depends on how different the behavior is from existing types.
+- **New turret type** (same behavior, different stats): Add enum value to `TurretType`, add a row in the `TurretDefinitions` asset, create a prefab. Zero code changes in systems or presentation.
+- **New creep variant** (same behavior, different stats): Add ScriptableObject definition asset → Addressables picks it up → existing systems process it. Data-only change.
+- **New turret/creep behavior** (e.g., a novel turret effect): Requires a new effect handler in the relevant system(s). Scope depends on how different the behavior is from existing types.
 - **New game state**: Implement `IGameState` → add to `GameState` enum → register with `GameStateMachine` → add transition rows in `GameFlowController`.
 - **New trigger**: Add to `GameTrigger` enum → add transition rows in `GameFlowController`. Existing states unchanged.
 - **New gameplay system**: Implement `IGameSystem` → add to `PlayingState` system array in `GameFlowController` at the correct tick position.
@@ -288,7 +302,8 @@ The spec emphasizes making gameplay values "easy to tweak and tune." All gamepla
 | `CreepDef` | `float speed`, `int damageToBase`, `int maxHealth`, `int coinReward` | Per-creep-type stats. | 2-6 |
 | `SpawnConfig` | `float spawnInterval`, `int creepsPerSpawn` | Spawn timing. Temporary driver until WaveSystem (Story 9) takes over. | 2 |
 | `BaseConfig` | `int maxHealth` | Base health tuning. | 3 |
-| `TurretDef` | `int damage`, `float range`, `float fireInterval`, `float projectileSpeed`, `int cost` | Per-turret-type stats. Future: `effectType`. | 5-6 |
+| `TurretTypeDefinition` | `TurretType turretType`, `GameObject prefab`, `int damage`, `float range`, `float fireInterval`, `float projectileSpeed`, `int cost`, `float slowDuration`, `float slowMultiplier` | `[Serializable]` struct — per-turret-type definition. Entries live in `TurretDefinitions.entries[]`. `Validate()` clamps fields to valid ranges (mutates in place — caller must reassign for struct copy semantics). | 5-7 |
+| `TurretDefinitions` | `TurretTypeDefinition[] entries` | ScriptableObject containing the ordered turret definitions table. First entry = default type. Order determines keyboard shortcuts (1-9) and HUD layout. `OnValidate()` detects duplicate `TurretType` entries. Single asset replaces per-type `TurretTypeDefinition` SOs. | 7 |
 | `EconomyConfig` | `int startingCoins` | Global economy tuning. | 6 |
 
 ### Planned ScriptableObjects (not yet implemented)

@@ -39,3 +39,34 @@
     color: rgb(255, 215, 0);
     -unity-font-style: bold;
 }
+
+.turret-selection-container {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    flex-direction: column;
+    padding: 5px;
+}
+
+.turret-selection-label {
+    font-size: 16px;
+    color: white;
+    -unity-font-style: bold;
+    margin-bottom: 4px;
+}
+
+.turret-option {
+    padding: 4px 8px;
+    margin-bottom: 2px;
+    border-radius: 3px;
+    background-color: rgba(50, 50, 50, 0.6);
+}
+
+.turret-option--selected {
+    background-color: rgba(80, 160, 255, 0.7);
+}
+
+.turret-option-label {
+    font-size: 14px;
+    color: white;
+}

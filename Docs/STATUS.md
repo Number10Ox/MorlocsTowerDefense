@@ -9,7 +9,7 @@
 | 2. Architecture - Detailed Design | In progress | Composition root, state machine, system scheduler, store pattern, economy documented |
 | 3. Constraints & Ground Rules | Complete | 9 constraints from spec + tool constraint |
 | 4. Tech Package Choices | Complete | Input System, UI Toolkit, UGUI (provided popups), Addressables (SO data), Cinemachine dropped |
-| 5. Data Configuration Strategy | In progress | CreepDef, SpawnConfig, BaseConfig, TurretDef, EconomyConfig SOs defined; WaveDef planned for Story 9 |
+| 5. Data Configuration Strategy | In progress | CreepDef, SpawnConfig, BaseConfig, EconomyConfig SOs defined; TurretTypeDefinition refactored to [Serializable] struct inside TurretDefinitions SO; WaveDef planned for Story 9 |
 | 6. Provided Assets Reference | Complete | All prefabs, scene, terrain, materials cataloged |
 | 7. Deliverables - User Stories | Complete | Stories 1-10 with acceptance criteria |
 
@@ -21,9 +21,9 @@
 | Story 2: Creep Spawning & Movement | Complete | CreepStore, SpawnSystem, MovementSystem, object pooling, PresentationAdapter sync |
 | Story 3: Base Health & Lose Condition | Complete | BaseStore, DamageSystem, LoseState, BaseConfig SO, BaseHealthHud (UI Toolkit), health HUD event-driven |
 | Story 4: Turret Placement | Complete | TurretStore (minimal, no removal pipeline), PlacementSystem, PlacementInput bridge, TurretComponent, PresentationAdapter input collection (raycast) + turret visual sync, turret pool |
-| Story 5: Turret Shooting & Creep Damage | Complete | ProjectileSystem (inline targeting), DamageSystem extended with projectile hits + OnCreepKilled, homing projectiles, dead-creep guards, TurretDef SO, ProjectileStore |
-| Story 6: Economy System | Complete | EconomyStore, EconomySystem (Phase 3), EconomyConfig SO, CoinHud (UI Toolkit), PlacementSystem affordability gate, DamageSystem OnCreepKilled carries reward, CoinReward on CreepSimData/CreepDef, cost on TurretDef |
-| Story 7: Turret Types (Regular & Freezing) | Not started | |
+| Story 5: Turret Shooting & Creep Damage | Complete | ProjectileSystem (inline targeting), DamageSystem extended with projectile hits + OnCreepKilled, homing projectiles, dead-creep guards, TurretTypeDefinition data, ProjectileStore |
+| Story 6: Economy System | Complete | EconomyStore, EconomySystem (Phase 3), EconomyConfig SO, CoinHud (UI Toolkit), PlacementSystem affordability gate, DamageSystem OnCreepKilled carries reward, CoinReward on CreepSimData/CreepDef, cost on TurretTypeDefinition |
+| Story 7: Turret Types (Regular & Freezing) | Complete | TurretType enum, TurretTypeStats struct (with Type field), TurretSelectionStore (defaultType constructor), TurretSelectionHud (dynamic generation from TurretTypeStats[]), slow effect system (DamageSystem writes, MovementSystem reads), per-type costs via IReadOnlyDictionary, data-driven keyboard selection (1-9), dictionary-based turret pools. Refactored to data-driven: TurretDefinitions SO + TurretTypeDirectoryBuilder/TurretTypeDirectory. Adding a new turret type requires zero code changes. PresentationAdapter refactored to use TurretVisual struct dictionary instead of separate turretMap/turretSourcePool. TurretDefinitions.OnValidate detects duplicate TurretType entries. |
 | Story 8: Creep Variety | Not started | |
 | Story 9: Wave System | Not started | |
 | Story 10: Game Reset | Not started | |
@@ -57,7 +57,7 @@
 - **Dead-creep guards**: `MovementSystem` and `DamageSystem.ProcessBaseDamage` skip creeps with `Health <= 0`. Prevents dead creeps from moving or dealing base damage after being killed by projectiles.
 - **OnCreepKilled event with reward**: `DamageSystem` fires `event Action<int, int>` (creepId, coinReward) on creep death. Reward passed through event so EconomySystem doesn't need CreepStore dependency.
 - **FireInterval naming**: Consistent use of `FireInterval` (seconds between shots) across all code and data. No `FireRate`.
-- **TurretDef SO**: ScriptableObject for turret stats (damage, range, fireInterval, projectileSpeed). Systems receive primitives at bootstrap, never SO references.
+- **TurretTypeDefinition data**: Turret stats (damage, range, fireInterval, projectileSpeed) defined as `TurretTypeDefinition` structs inside `TurretDefinitions` SO. Systems receive primitives at bootstrap, never SO references.
 - **ProjectileStore with deferred removal**: Mirrors CreepStore pattern — `Add`, `MarkForRemoval`, `BeginFrame` (flush + clear frame lists). Plus `HitsThisFrame` for cross-system hit communication.
 - **GameBootstrap renamed to GameFlowController**: Composition root + game loop pump only. Class suffix taxonomy established (Controller, Coordinator, Adapter, System, Store, State).
 - **GameUiCoordinator extracted**: Presentation state decisions (popup lifecycle, HUD visibility, health forwarding) extracted from GameFlowController into `GameUiCoordinator`. Subscribes to state machine and store events. No simulation writes. Idempotent Teardown.
@@ -69,9 +69,20 @@
 - **CoinReward per creep**: `CreepSimData.CoinReward` set by `SpawnSystem` at creation from `CreepDef.CoinReward`. Follows `DamageToBase` precedent.
 - **CoinHud**: Stateless UI Toolkit view. Shares UIDocument with `BaseHealthHud`. `GameUiCoordinator` forwards `EconomyStore.OnCoinsChanged` to `CoinHud.UpdateCoins`.
 - **EconomyConfig SO**: ScriptableObject for `startingCoins` tuning. Assigned to `GameFlowController` in Inspector.
-- **TurretDef.Cost**: Per-turret-type cost field. Passed to `PlacementSystem` and `EconomySystem` as primitive.
+- **TurretTypeDefinition.Cost**: Per-turret-type cost field. Passed to `PlacementSystem` and `EconomySystem` as primitive.
 - **Coin-timing contract (next-frame spendability)**: Kill rewards are applied in Phase 3 (`EconomySystem.Tick`). `PlacementSystem` checks `CanAfford()` in Phase 1 using the balance from the prior frame's resolution. Coins earned this frame are not spendable until next frame. This is consistent with the deferred-removal contract used throughout the project: the frame boundary is the commit point.
 - **One placement per frame invariant**: `PresentationAdapter.CollectInput()` clears `PlacementInput` at the start of each frame, and `PlacementSystem` clears it after consuming. At most one placement request can exist per frame. If multi-placement is needed in the future, gate against projected spend (`cost * requestCount`).
+
+- **TurretSelectionStore (not PlacementInput)**: Turret type selection persists across frames and lives in `TurretSelectionStore` (proper Store pattern). Constructor takes `TurretType defaultType` — no hardcoded value. `PlacementInput` remains strictly ephemeral (PlaceRequested, WorldPosition, Clear). Writer: `PresentationAdapter` (data-driven keyboard shortcuts 1-9 from `turretTypeOrder`). Readers: `PlacementSystem`, `GameUiCoordinator`.
+- **Data-driven turret types**: Single `TurretDefinitions` ScriptableObject contains an ordered array of `TurretTypeDefinition` structs (each with turretType, prefab, stats, slow params). `TurretTypeDirectoryBuilder.TryBuild()` validates entries and produces a `TurretTypeDirectory` (immutable result object with `OrderedTypes`, `OrderedStats`, `StatsByType`, `PrefabsByType`, `DefaultType`). Adding a new turret type requires: enum value + catalog row + prefab — zero system/presentation code changes.
+- **TurretTypeStats as single source of truth**: Readonly struct with `Type` field, built by `TurretTypeDirectoryBuilder.TryBuild()` from `TurretDefinitions` entries. Passed as `IReadOnlyDictionary<TurretType, TurretTypeStats>` to `PlacementSystem`, `EconomySystem`. Passed as `TurretTypeStats[]` to `TurretSelectionHud`. Eliminates cost duplication and type-branching across systems.
+- **TurretTypeDirectoryBuilder (pure C# builder)**: Static helper validates catalog entries (null prefabs, duplicate types, suspicious slow configs) and builds a `TurretTypeDirectory` (immutable result object). `TryBuild()` returns `TurretTypeDirectory` via single `out` parameter instead of multiple `out` parameters. Keeps `GameFlowController.Awake()` clean. Unit-testable without Unity runtime.
+- **Slow effect via single-writer discipline**: `DamageSystem` writes `CreepSimData.SlowRemainingTime` and `SlowMultiplier`. `MovementSystem` reads them. Slow data propagates through the system: `TurretTypeDefinition` → `TurretTypeStats` → `TurretSimData` → `ProjectileSimData` → `ProjectileHit` → `CreepSimData`.
+- **Slow timer semantics**: Effective slow duration is `[duration, duration + dt]` due to Phase 1/Phase 2 ordering. Acceptable for tower defense. Tests use tolerance.
+- **Dictionary-based turret pools**: `PresentationAdapter` manages `IReadOnlyDictionary<TurretType, GameObjectPool> turretPoolByType`. Pools built by `GameFlowController` from `PrefabsByType`. Uses `TurretVisual` struct dictionary (`turretVisuals`) to track each turret's GameObject and source pool together, replacing separate `turretMap` and `turretSourcePool` dictionaries. Data-driven — new types get pools automatically.
+- **Per-type costs via dictionary**: `EconomySystem` reads `turret.Type` and looks up `statsByType[type].Cost`. `PlacementSystem` reads `selectionStore.SelectedType` to pick matching `TurretTypeStats` via dictionary lookup. No switch statements on TurretType.
+- **TurretSelectionHud (dynamic generation)**: Builds UI elements dynamically from `TurretTypeStats[]`. Accepts `TurretType initialSelection`. Rebuilds into inner `turret-options` UXML container. Labels include keyboard shortcut and cost. USS class toggle (`turret-option--selected`) for highlighting.
+- **Ordering contract**: Array order in `TurretDefinitions` determines default type (`OrderedTypes[0]` / `DefaultType`), keyboard shortcuts (1-9), and HUD layout. Documented in catalog tooltip. `TurretDefinitions.OnValidate()` also detects duplicate TurretType entries.
 
 ## Open Questions
 

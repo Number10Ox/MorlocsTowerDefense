@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -13,7 +14,19 @@ public class PlacementSystemTests
     private TurretStore turretStore;
     private PlacementInput placementInput;
     private EconomyStore economyStore;
+    private TurretSelectionStore selectionStore;
     private PlacementSystem system;
+
+    private static readonly TurretTypeStats DefaultStats = new TurretTypeStats(
+        TurretType.Regular, DEFAULT_RANGE, DEFAULT_FIRE_INTERVAL, DEFAULT_DAMAGE,
+        DEFAULT_PROJECTILE_SPEED, DEFAULT_TURRET_COST);
+
+    private static readonly Dictionary<TurretType, TurretTypeStats> DefaultStatsByType =
+        new Dictionary<TurretType, TurretTypeStats>
+        {
+            { TurretType.Regular, DefaultStats },
+            { TurretType.Freezing, DefaultStats }
+        };
 
     [SetUp]
     public void SetUp()
@@ -21,15 +34,13 @@ public class PlacementSystemTests
         turretStore = new TurretStore();
         placementInput = new PlacementInput();
         economyStore = new EconomyStore(HIGH_STARTING_COINS);
+        selectionStore = new TurretSelectionStore(TurretType.Regular);
         system = new PlacementSystem(
             turretStore,
             placementInput,
             economyStore,
-            DEFAULT_RANGE,
-            DEFAULT_FIRE_INTERVAL,
-            DEFAULT_DAMAGE,
-            DEFAULT_PROJECTILE_SPEED,
-            DEFAULT_TURRET_COST);
+            selectionStore,
+            DefaultStatsByType);
     }
 
     [Test]
@@ -126,14 +137,8 @@ public class PlacementSystemTests
     {
         var poorStore = new EconomyStore(0);
         var poorSystem = new PlacementSystem(
-            turretStore,
-            placementInput,
-            poorStore,
-            DEFAULT_RANGE,
-            DEFAULT_FIRE_INTERVAL,
-            DEFAULT_DAMAGE,
-            DEFAULT_PROJECTILE_SPEED,
-            DEFAULT_TURRET_COST);
+            turretStore, placementInput, poorStore, selectionStore,
+            DefaultStatsByType);
 
         placementInput.PlaceRequested = true;
         placementInput.WorldPosition = Vector3.zero;
@@ -148,14 +153,8 @@ public class PlacementSystemTests
     {
         var poorStore = new EconomyStore(0);
         var poorSystem = new PlacementSystem(
-            turretStore,
-            placementInput,
-            poorStore,
-            DEFAULT_RANGE,
-            DEFAULT_FIRE_INTERVAL,
-            DEFAULT_DAMAGE,
-            DEFAULT_PROJECTILE_SPEED,
-            DEFAULT_TURRET_COST);
+            turretStore, placementInput, poorStore, selectionStore,
+            DefaultStatsByType);
 
         placementInput.PlaceRequested = true;
         placementInput.WorldPosition = Vector3.zero;
@@ -170,14 +169,8 @@ public class PlacementSystemTests
     {
         var exactStore = new EconomyStore(DEFAULT_TURRET_COST);
         var exactSystem = new PlacementSystem(
-            turretStore,
-            placementInput,
-            exactStore,
-            DEFAULT_RANGE,
-            DEFAULT_FIRE_INTERVAL,
-            DEFAULT_DAMAGE,
-            DEFAULT_PROJECTILE_SPEED,
-            DEFAULT_TURRET_COST);
+            turretStore, placementInput, exactStore, selectionStore,
+            DefaultStatsByType);
 
         placementInput.PlaceRequested = true;
         placementInput.WorldPosition = Vector3.zero;

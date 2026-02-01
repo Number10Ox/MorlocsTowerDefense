@@ -9,4 +9,8 @@
     <ui:VisualElement name="coin-container" class="coin-container">
         <ui:Label name="coin-label" text="Coins: 0" class="coin-label" />
     </ui:VisualElement>
+    <ui:VisualElement name="turret-selection-container" class="turret-selection-container">
+        <ui:Label name="turret-selection-label" text="Turrets:" class="turret-selection-label" />
+        <ui:VisualElement name="turret-options" />
+    </ui:VisualElement>
 </ui:UXML>

@@ -1,15 +1,17 @@
 using System;
 using UnityEngine;
 
-// State-driven presentation decisions: popup lifecycle, HUD visibility, health and coin forwarding.
-// Subscribes to state machine and store events. No simulation writes.
+// State-driven presentation decisions: popup lifecycle, HUD visibility, health/coin/turret-selection forwarding.
+// Subscribes to state machine, store events, and turret selection events. No simulation writes.
 public class GameUiCoordinator
 {
     private GameStateMachine stateMachine;
     private BaseStore baseStore;
     private EconomyStore economyStore;
+    private TurretSelectionStore selectionStore;
     private BaseHealthHud baseHealthHud;
     private CoinHud coinHud;
+    private TurretSelectionHud turretSelectionHud;
     private readonly GameObject losePopupPrefab;
     private readonly Transform popupParent;
     private GameObject losePopupInstance;
@@ -19,16 +21,20 @@ public class GameUiCoordinator
         GameStateMachine stateMachine,
         BaseStore baseStore,
         EconomyStore economyStore,
+        TurretSelectionStore selectionStore,
         BaseHealthHud baseHealthHud,
         CoinHud coinHud,
+        TurretSelectionHud turretSelectionHud,
         GameObject losePopupPrefab,
         Transform popupParent)
     {
         this.stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
         this.baseStore = baseStore ?? throw new ArgumentNullException(nameof(baseStore));
         this.economyStore = economyStore ?? throw new ArgumentNullException(nameof(economyStore));
+        this.selectionStore = selectionStore;
         this.baseHealthHud = baseHealthHud;
         this.coinHud = coinHud;
+        this.turretSelectionHud = turretSelectionHud;
         this.losePopupPrefab = losePopupPrefab;
         this.popupParent = popupParent;
 
@@ -42,6 +48,11 @@ public class GameUiCoordinator
         if (coinHud != null)
         {
             economyStore.OnCoinsChanged += OnCoinsChanged;
+        }
+
+        if (turretSelectionHud != null && selectionStore != null)
+        {
+            selectionStore.OnSelectionChanged += OnTurretSelectionChanged;
         }
 
         Refresh();
@@ -61,6 +72,15 @@ public class GameUiCoordinator
         {
             coinHud.UpdateCoins(economyStore.CurrentCoins);
             coinHud.SetVisible(isPlaying);
+        }
+
+        if (turretSelectionHud != null)
+        {
+            if (selectionStore != null)
+            {
+                turretSelectionHud.UpdateSelection(selectionStore.SelectedType);
+            }
+            turretSelectionHud.SetVisible(isPlaying);
         }
     }
 
@@ -88,6 +108,13 @@ public class GameUiCoordinator
         }
         economyStore = null;
         coinHud = null;
+
+        if (selectionStore != null && turretSelectionHud != null)
+        {
+            selectionStore.OnSelectionChanged -= OnTurretSelectionChanged;
+        }
+        selectionStore = null;
+        turretSelectionHud = null;
 
         if (losePopupInstance != null)
         {
@@ -124,6 +151,11 @@ public class GameUiCoordinator
         {
             coinHud.SetVisible(isPlaying);
         }
+
+        if (turretSelectionHud != null)
+        {
+            turretSelectionHud.SetVisible(isPlaying);
+        }
     }
 
     private void OnBaseHealthChanged(int current, int max)
@@ -139,6 +171,14 @@ public class GameUiCoordinator
         if (coinHud != null)
         {
             coinHud.UpdateCoins(currentCoins);
+        }
+    }
+
+    private void OnTurretSelectionChanged(TurretType type)
+    {
+        if (turretSelectionHud != null)
+        {
+            turretSelectionHud.UpdateSelection(type);
         }
     }
 }

@@ -6,14 +6,16 @@ public class GameSession
     public TurretStore TurretStore { get; }
     public ProjectileStore ProjectileStore { get; }
     public EconomyStore EconomyStore { get; }
+    public TurretSelectionStore TurretSelectionStore { get; }
 
-    public GameSession(int baseMaxHealth, int startingCoins)
+    public GameSession(int baseMaxHealth, int startingCoins, TurretType defaultTurretType)
     {
         CreepStore = new CreepStore();
         BaseStore = new BaseStore(baseMaxHealth);
         TurretStore = new TurretStore();
         ProjectileStore = new ProjectileStore();
         EconomyStore = new EconomyStore(startingCoins);
+        TurretSelectionStore = new TurretSelectionStore(defaultTurretType);
     }
 
     public void BeginFrame()
@@ -32,5 +34,6 @@ public class GameSession
         TurretStore.Reset();
         ProjectileStore.Reset();
         EconomyStore.Reset();
+        TurretSelectionStore.Reset();
     }
 }

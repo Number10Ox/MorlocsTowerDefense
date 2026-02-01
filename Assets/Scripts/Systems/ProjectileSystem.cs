@@ -58,7 +58,9 @@ public class ProjectileSystem : IGameSystem
                 Position = turret.Position,
                 TargetCreepId = targetId,
                 Damage = turret.Damage,
-                Speed = turret.ProjectileSpeed
+                Speed = turret.ProjectileSpeed,
+                SlowDuration = turret.SlowDuration,
+                SlowMultiplier = turret.SlowMultiplier
             };
             projectileStore.Add(projectile);
 
@@ -109,7 +111,7 @@ public class ProjectileSystem : IGameSystem
 
             if (distSq <= hitThresholdSq)
             {
-                projectileStore.RecordHit(new ProjectileHit(proj.TargetCreepId, proj.Damage));
+                projectileStore.RecordHit(new ProjectileHit(proj.TargetCreepId, proj.Damage, proj.SlowDuration, proj.SlowMultiplier));
                 projectileStore.MarkForRemoval(proj.Id);
                 continue;
             }
@@ -119,7 +121,7 @@ public class ProjectileSystem : IGameSystem
 
             if (step >= distance)
             {
-                projectileStore.RecordHit(new ProjectileHit(proj.TargetCreepId, proj.Damage));
+                projectileStore.RecordHit(new ProjectileHit(proj.TargetCreepId, proj.Damage, proj.SlowDuration, proj.SlowMultiplier));
                 projectileStore.MarkForRemoval(proj.Id);
                 continue;
             }

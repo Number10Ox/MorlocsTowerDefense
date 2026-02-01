@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -9,12 +10,22 @@ public class EconomyIntegrationTests
     private const int CREEP_MAX_HEALTH = 1;
     private const int TURRET_DAMAGE = 1;
 
+    private static readonly TurretTypeStats DefaultStats = new TurretTypeStats(
+        TurretType.Regular, 10f, 1f, TURRET_DAMAGE, 15f, TURRET_COST);
+
+    private static readonly Dictionary<TurretType, TurretTypeStats> DefaultStatsByType =
+        new Dictionary<TurretType, TurretTypeStats>
+        {
+            { TurretType.Regular, DefaultStats }
+        };
+
     private CreepStore creepStore;
     private BaseStore baseStore;
     private TurretStore turretStore;
     private ProjectileStore projectileStore;
     private EconomyStore economyStore;
     private PlacementInput placementInput;
+    private TurretSelectionStore selectionStore;
 
     private DamageSystem damageSystem;
     private PlacementSystem placementSystem;
@@ -29,12 +40,13 @@ public class EconomyIntegrationTests
         projectileStore = new ProjectileStore();
         economyStore = new EconomyStore(STARTING_COINS);
         placementInput = new PlacementInput();
+        selectionStore = new TurretSelectionStore(TurretType.Regular);
 
         damageSystem = new DamageSystem(creepStore, baseStore, projectileStore);
         placementSystem = new PlacementSystem(
             turretStore, placementInput, economyStore,
-            10f, 1f, TURRET_DAMAGE, 15f, TURRET_COST);
-        economySystem = new EconomySystem(economyStore, turretStore, TURRET_COST);
+            selectionStore, DefaultStatsByType);
+        economySystem = new EconomySystem(economyStore, turretStore, DefaultStatsByType);
 
         damageSystem.OnCreepKilled += economySystem.HandleCreepKilled;
     }
@@ -67,9 +79,10 @@ public class EconomyIntegrationTests
     public void PlacementBlocked_InsufficientCoins()
     {
         var brokeStore = new EconomyStore(TURRET_COST - 1);
+        var brokeSelStore = new TurretSelectionStore(TurretType.Regular);
         var system = new PlacementSystem(
             turretStore, placementInput, brokeStore,
-            10f, 1f, 1, 15f, TURRET_COST);
+            brokeSelStore, DefaultStatsByType);
 
         placementInput.PlaceRequested = true;
         placementInput.WorldPosition = Vector3.zero;
@@ -84,9 +97,10 @@ public class EconomyIntegrationTests
     public void PlacementSucceeds_ExactCoins()
     {
         var exactStore = new EconomyStore(TURRET_COST);
+        var exactSelStore = new TurretSelectionStore(TurretType.Regular);
         var system = new PlacementSystem(
             turretStore, placementInput, exactStore,
-            10f, 1f, 1, 15f, TURRET_COST);
+            exactSelStore, DefaultStatsByType);
 
         placementInput.PlaceRequested = true;
         placementInput.WorldPosition = Vector3.zero;

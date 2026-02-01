@@ -20,13 +20,13 @@ classDiagram
     }
 
     class GameStateMachine {
-        -Dictionary~GameState‚ IGameState~ states
-        -Dictionary~StateAndTrigger‚ GameState~ transitions
+        -Dictionary~GameState, IGameState~ states
+        -Dictionary~StateAndTrigger, GameState~ transitions
         -IGameState currentState
         -GameState currentStateId
         -GameTrigger? pendingTrigger
         +GameState CurrentStateId
-        +event Action~GameState‚ GameState~ OnStateChanged
+        +event Action~GameState, GameState~ OnStateChanged
         +AddState(GameState, IGameState)
         +AddTransition(GameState, GameTrigger, GameState)
         +Start(GameState)
@@ -308,11 +308,13 @@ flowchart TD
 ```
 Assets/
 ├── Scripts/
-│   ├── App/                      # Composition root, session, game state/trigger enums
+│   ├── App/                      # Composition root, session, game state/trigger enums, turret type directory builder
 │   │   ├── GameFlowController.cs
 │   │   ├── GameSession.cs
 │   │   ├── GameState.cs
-│   │   └── GameTrigger.cs
+│   │   ├── GameTrigger.cs
+│   │   ├── TurretTypeDirectory.cs
+│   │   └── TurretTypeDirectoryBuilder.cs
 │   ├── Framework/                # Reusable infrastructure
 │   │   ├── StateMachine/
 │   │   │   ├── GameStateMachine.cs
@@ -332,12 +334,15 @@ Assets/
 │   │   ├── BaseStore.cs
 │   │   ├── TurretStore.cs
 │   │   ├── ProjectileStore.cs
-│   │   └── EconomyStore.cs
+│   │   ├── EconomyStore.cs
+│   │   └── TurretSelectionStore.cs
 │   ├── SimData/                  # Pure simulation data classes/structs
 │   │   ├── CreepSimData.cs
 │   │   ├── TurretSimData.cs
 │   │   ├── ProjectileSimData.cs
-│   │   └── ProjectileHit.cs
+│   │   ├── ProjectileHit.cs
+│   │   ├── TurretType.cs
+│   │   └── TurretTypeStats.cs
 │   ├── Systems/                  # IGameSystem implementations
 │   │   ├── SpawnSystem.cs
 │   │   ├── MovementSystem.cs
@@ -358,6 +363,7 @@ Assets/
 │   │   ├── GameUiCoordinator.cs
 │   │   ├── BaseHealthHud.cs
 │   │   ├── CoinHud.cs
+│   │   ├── TurretSelectionHud.cs
 │   │   ├── BaseHealthHud.uss
 │   │   ├── BaseHealthHud.uxml
 │   │   └── DefaultPanel Settings.asset
@@ -365,7 +371,8 @@ Assets/
 │   │   ├── CreepDef.cs
 │   │   ├── SpawnConfig.cs
 │   │   ├── BaseConfig.cs
-│   │   ├── TurretDef.cs
+│   │   ├── TurretTypeDefinition.cs
+│   │   ├── TurretDefinitions.cs
 │   │   └── EconomyConfig.cs
 │   └── Waves/                    # (Story 9)
 ├── Tests/
@@ -393,7 +400,10 @@ Assets/
 │   │   ├── GameUiCoordinatorTests.cs
 │   │   ├── EconomyStoreTests.cs
 │   │   ├── EconomySystemTests.cs
-│   │   └── EconomyIntegrationTests.cs
+│   │   ├── EconomyIntegrationTests.cs
+│   │   ├── TurretTypesTests.cs
+│   │   ├── TurretTypesIntegrationTests.cs
+│   │   └── TurretTypeDirectoryBuilderTests.cs
 │   └── Runtime/
 │       └── RuntimeTests.asmdef
 ├── Prefabs/
@@ -488,7 +498,7 @@ classDiagram
     GameSession --> CreepStore : owns
     CreepStore --> "0..*" CreepSimData : stores
     SpawnSystem --> CreepStore : writes via Add()
-    MovementSystem --> CreepStore : reads ActiveCreeps‚ writes via MarkForRemoval()
+    MovementSystem --> CreepStore : reads ActiveCreeps, writes via MarkForRemoval()
     SpawnSystem ..|> IGameSystem
     MovementSystem ..|> IGameSystem
     CreepComponent ..|> IPoolable
@@ -519,7 +529,7 @@ sequenceDiagram
 
     Bootstrap->>Session: BeginFrame()
     Session->>Store: BeginFrame()
-    Note over Store: Flush pending removals‚ clear frame lists
+    Note over Store: Flush pending removals, clear frame lists
 
     Bootstrap->>Spawn: Tick(dt)
     Spawn->>Store: Add(creepSimData)
@@ -531,7 +541,7 @@ sequenceDiagram
     Bootstrap->>Pres: SyncVisuals()
     Pres->>Store: Read SpawnedThisFrame
     Pres->>Pool: Acquire(position)
-    Note over Pres: Creates GO‚ maps to creep ID
+    Note over Pres: Creates GO, maps to creep ID
 
     Pres->>Store: Read ActiveCreeps
     Note over Pres: Updates Transform.position
@@ -553,7 +563,7 @@ sequenceDiagram
     Bootstrap->>Pres: SyncVisuals()
     Pres->>Store: Read RemovedIdsThisFrame
     Pres->>Pool: Return(GO)
-    Note over Pres: Returns GO to pool‚ removes from map
+    Note over Pres: Returns GO to pool, removes from map
 ```
 
 ---
@@ -572,7 +582,7 @@ classDiagram
         +int CurrentHealth
         +bool IsDestroyed
         +int DamageTakenThisFrame
-        +event Action~int‚ int~ OnBaseHealthChanged
+        +event Action~int, int~ OnBaseHealthChanged
         +ApplyDamage(int amount)
         +BeginFrame()
         +Reset()
@@ -601,7 +611,7 @@ classDiagram
         -Label healthLabel
         -VisualElement healthBarFill
         -VisualElement healthContainer
-        +UpdateHealth(int current‚ int max)
+        +UpdateHealth(int current, int max)
         +SetVisible(bool visible)
     }
 
@@ -669,8 +679,8 @@ sequenceDiagram
     Note over Dmg: ReachedBase && !HasDealtBaseDamage
     Dmg->>BStore: ApplyDamage(creep.DamageToBase)
     Dmg-->>CStore: creep.HasDealtBaseDamage = true
-    BStore-->>HUD: OnBaseHealthChanged(current‚ max)
-    HUD-->>HUD: UpdateHealth(current‚ max)
+    BStore-->>HUD: OnBaseHealthChanged(current, max)
+    HUD-->>HUD: UpdateHealth(current, max)
 
     Note over Bootstrap: Frame N+1 — base destroyed check
 
@@ -687,10 +697,10 @@ sequenceDiagram
     Note over Bootstrap: Frame N+2 — transition to Lose
 
     Bootstrap->>SM: Tick(dt)
-    Note over SM: Resolve (Playing‚ BaseDestroyed) → Lose
+    Note over SM: Resolve (Playing, BaseDestroyed) → Lose
     SM->>Playing: Exit()
     SM->>SM: Switch to LoseState
-    SM-->>Bootstrap: OnStateChanged(Playing‚ Lose)
+    SM-->>Bootstrap: OnStateChanged(Playing, Lose)
     Note over Bootstrap: losePopup.SetActive(true)
     Note over Bootstrap: baseHealthHud.SetVisible(false)
 ```
@@ -784,7 +794,7 @@ sequenceDiagram
     Bootstrap->>Pres: CollectInput()
     Note over Pres: Mouse.leftButton.wasPressedThisFrame
     Pres->>Pres: Raycast against terrain
-    Pres->>Input: PlaceRequested=true‚ WorldPosition=hitPoint
+    Pres->>Input: PlaceRequested=true, WorldPosition=hitPoint
 
     Bootstrap->>Session: BeginFrame()
     Session->>TStore: BeginFrame()
@@ -799,7 +809,7 @@ sequenceDiagram
     Bootstrap->>Pres: SyncVisuals()
     Pres->>TStore: Read PlacedThisFrame
     Pres->>Pool: Acquire(position)
-    Note over Pres: Creates GO‚ maps to turret ID
+    Note over Pres: Creates GO, maps to turret ID
 
     Note over Unity: Frame N+1 — no click
 
@@ -812,10 +822,10 @@ sequenceDiagram
     Note over TStore: Clear placedThisFrame (turret stays in activeTurrets)
 
     Bootstrap->>Place: Tick(dt)
-    Note over Place: PlaceRequested? → no‚ skip
+    Note over Place: PlaceRequested? → no, skip
 
     Bootstrap->>Pres: SyncVisuals()
-    Note over Pres: No new turrets to spawn‚ existing turret GO persists
+    Note over Pres: No new turrets to spawn, existing turret GO persists
 ```
 
 ---
@@ -865,7 +875,7 @@ classDiagram
         +Tick(float deltaTime)
         +Reset()
         -UpdateFireTimers(float)
-        -FindNearestCreepInRange(Vector3‚ float) int
+        -FindNearestCreepInRange(Vector3, float) int
         -MoveProjectiles(float)
     }
 
@@ -873,18 +883,15 @@ classDiagram
         -CreepStore creepStore
         -BaseStore baseStore
         -ProjectileStore projectileStore
-        +event Action~int‚ int~ OnCreepKilled
+        +event Action~int, int~ OnCreepKilled
         +Tick(float deltaTime)
         -ProcessProjectileHits()
         -ProcessBaseDamage()
     }
 
-    class TurretDef {
-        <<ScriptableObject>>
-        -int damage
-        -float range
-        -float fireInterval
-        -float projectileSpeed
+    class TurretTypeDefinition {
+        <<struct>>
+        +TurretType Type
         +int Damage
         +float Range
         +float FireInterval
@@ -926,7 +933,7 @@ classDiagram
     ProjectileStore --> "0..*" ProjectileSimData : stores
     ProjectileSystem --> TurretStore : reads ActiveTurrets
     ProjectileSystem --> CreepStore : reads ActiveCreeps
-    ProjectileSystem --> ProjectileStore : writes via Add()‚ MarkForRemoval()‚ RecordHit()
+    ProjectileSystem --> ProjectileStore : writes via Add(), MarkForRemoval(), RecordHit()
     ProjectileSystem ..|> IGameSystem
     DamageSystem --> CreepStore : reads/writes Health
     DamageSystem --> BaseStore : writes via ApplyDamage()
@@ -935,7 +942,7 @@ classDiagram
     ProjectileComponent ..|> IPoolable
     PresentationAdapter --> ProjectileStore : reads change lists
     PresentationAdapter --> GameObjectPool : manages projectile GOs
-    GameFlowController --> TurretDef : serialized ref
+    GameFlowController --> TurretTypeDefinition : serialized ref
 ```
 
 **Notes:**
@@ -966,7 +973,7 @@ sequenceDiagram
     Session->>CStore: BeginFrame()
     Session->>TStore: BeginFrame()
     Session->>PStore: BeginFrame()
-    Note over PStore: Clear frame lists‚ flush removals
+    Note over PStore: Clear frame lists, flush removals
 
     Bootstrap->>ProjSys: Tick(dt)
     Note over ProjSys: UpdateFireTimers: turret.FireCooldown -= dt
@@ -986,7 +993,7 @@ sequenceDiagram
     DmgSys->>CStore: creep.Health -= hit.Damage
     alt creep.Health <= 0
         DmgSys->>CStore: MarkForRemoval(creepId)
-        DmgSys-->>DmgSys: OnCreepKilled?.Invoke(creepId‚ coinReward)
+        DmgSys-->>DmgSys: OnCreepKilled?.Invoke(creepId, coinReward)
     end
 
     Note over DmgSys: ProcessBaseDamage
@@ -1048,7 +1055,7 @@ classDiagram
         -TurretStore turretStore
         -int turretCost
         -int pendingCoinCredits
-        +HandleCreepKilled(int creepId‚ int coinReward)
+        +HandleCreepKilled(int creepId, int coinReward)
         +Tick(float deltaTime)
         +Reset()
     }
@@ -1067,7 +1074,7 @@ classDiagram
     }
 
     class DamageSystem {
-        +event Action~int‚ int~ OnCreepKilled
+        +event Action~int, int~ OnCreepKilled
     }
 
     class PlacementSystem {
@@ -1081,11 +1088,11 @@ classDiagram
     }
 
     GameSession --> EconomyStore : owns
-    EconomySystem --> EconomyStore : writes via AddCoins()‚ TrySpendCoins()
+    EconomySystem --> EconomyStore : writes via AddCoins(), TrySpendCoins()
     EconomySystem --> TurretStore : reads PlacedThisFrame
     EconomySystem ..|> IGameSystem
     PlacementSystem --> EconomyStore : reads via CanAfford()
-    DamageSystem ..> EconomySystem : OnCreepKilled(id‚ reward)
+    DamageSystem ..> EconomySystem : OnCreepKilled(id, reward)
     GameUiCoordinator --> CoinHud : optional
     GameUiCoordinator --> EconomyStore : listens OnCoinsChanged
     GameFlowController --> EconomyConfig : serialized ref
@@ -1117,7 +1124,7 @@ sequenceDiagram
 
     Bootstrap->>Session: BeginFrame()
     Session->>EStore: BeginFrame()
-    Note over EStore: Clear coinsEarnedThisFrame‚ coinsSpentThisFrame
+    Note over EStore: Clear coinsEarnedThisFrame, coinsSpentThisFrame
 
     Note over Bootstrap: Phase 1 — World Update
     Bootstrap->>PlaceSys: Tick(dt)
@@ -1129,7 +1136,7 @@ sequenceDiagram
     Note over Bootstrap: Phase 2 — Combat
     Bootstrap->>DmgSys: Tick(dt)
     Note over DmgSys: Creep killed
-    DmgSys-->>EcoSys: OnCreepKilled(creepId‚ coinReward)
+    DmgSys-->>EcoSys: OnCreepKilled(creepId, coinReward)
     Note over EcoSys: Buffer: pendingCoinCredits += coinReward
 
     Note over Bootstrap: Phase 3 — Resolution
@@ -1148,3 +1155,203 @@ sequenceDiagram
 - **Phase 2**: `DamageSystem` kills creep, fires `OnCreepKilled(id, reward)`. `EconomySystem` buffers credit locally.
 - **Phase 3**: `EconomySystem.Tick()` applies buffered credits first (coins go up), then deducts for each turret in `PlacedThisFrame` (coins go down). Net balance is correct.
 - Credits before debits ensures that if a creep kill and turret placement happen in the same frame, the kill reward is applied before the cost is deducted.
+
+---
+
+## Story 7 — Turret Types (Regular & Freezing)
+
+### Class Diagram
+
+```mermaid
+classDiagram
+    class TurretType {
+        <<enumeration>>
+        Regular
+        Freezing
+    }
+
+    class TurretTypeStats {
+        <<struct>>
+        +TurretType Type
+        +float Range
+        +float FireInterval
+        +int Damage
+        +float ProjectileSpeed
+        +int Cost
+        +float SlowDuration
+        +float SlowMultiplier
+    }
+
+    class TurretDefinitions {
+        <<ScriptableObject>>
+        -TurretTypeDefinition[] entries
+        +TurretTypeDefinition[] Entries
+        +OnValidate()
+    }
+
+    class TurretTypeDirectoryBuilder {
+        <<static>>
+        +TryBuild(TurretTypeDefinition[], out TurretTypeDirectory) bool
+    }
+
+    class TurretTypeDirectory {
+        <<sealed>>
+        +TurretType[] OrderedTypes
+        +TurretTypeStats[] OrderedStats
+        +IReadOnlyDictionary~TurretType, TurretTypeStats~ StatsByType
+        +IReadOnlyDictionary~TurretType, GameObject~ PrefabsByType
+        +TurretType DefaultType
+    }
+
+    class TurretSelectionStore {
+        -TurretType defaultType
+        -TurretType selectedType
+        +TurretType SelectedType
+        +event Action~TurretType~ OnSelectionChanged
+        +TurretSelectionStore(TurretType defaultType)
+        +SelectType(TurretType)
+        +Reset()
+    }
+
+    class TurretSelectionHud {
+        -Dictionary~TurretType, VisualElement~ optionElements
+        +TurretSelectionHud(UIDocument, TurretTypeStats[], TurretType)
+        +UpdateSelection(TurretType)
+        +SetVisible(bool)
+    }
+
+    class PlacementSystem {
+        -TurretStore turretStore
+        -PlacementInput placementInput
+        -EconomyStore economyStore
+        -TurretSelectionStore selectionStore
+        -IReadOnlyDictionary~TurretType, TurretTypeStats~ statsByType
+        +Tick(float deltaTime)
+        +Reset()
+    }
+
+    class DamageSystem {
+        -CreepStore creepStore
+        -BaseStore baseStore
+        -ProjectileStore projectileStore
+        +event Action~int, int~ OnCreepKilled
+        +Tick(float deltaTime)
+        -TickSlowEffects(float)
+        -ProcessProjectileHits()
+        -ProcessBaseDamage()
+    }
+
+    class EconomySystem {
+        -EconomyStore economyStore
+        -TurretStore turretStore
+        -IReadOnlyDictionary~TurretType, TurretTypeStats~ statsByType
+        +Tick(float deltaTime)
+    }
+
+    class CreepSimData {
+        +float SlowRemainingTime
+        +float SlowMultiplier
+    }
+
+    class TurretSimData {
+        +TurretType Type
+        +float SlowDuration
+        +float SlowMultiplier
+    }
+
+    class ProjectileSimData {
+        +float SlowDuration
+        +float SlowMultiplier
+    }
+
+    class ProjectileHit {
+        <<struct>>
+        +float SlowDuration
+        +float SlowMultiplier
+    }
+
+    PlacementSystem --> TurretSelectionStore : reads SelectedType
+    PlacementSystem --> TurretTypeStats : picks stats by type
+    PlacementSystem --> EconomyStore : reads CanAfford(stats.Cost)
+    PresentationAdapter --> TurretSelectionStore : writes in CollectInput()
+    GameUiCoordinator --> TurretSelectionStore : listens OnSelectionChanged
+    GameUiCoordinator --> TurretSelectionHud : forwards selection
+    DamageSystem --> CreepSimData : writes SlowRemainingTime, SlowMultiplier
+    MovementSystem --> CreepSimData : reads SlowRemainingTime, SlowMultiplier
+    ProjectileSystem --> TurretSimData : reads SlowDuration, SlowMultiplier
+    ProjectileSystem --> ProjectileSimData : writes SlowDuration, SlowMultiplier
+    DamageSystem --> ProjectileHit : reads SlowDuration, SlowMultiplier
+    EconomySystem --> TurretSimData : reads Type for per-type cost
+    GameFlowController --> TurretTypeDirectoryBuilder : TryBuild(definitions.Entries)
+    TurretTypeDirectoryBuilder --> TurretTypeDirectory : builds via out parameter
+    TurretTypeDirectory --> TurretTypeStats : contains statsByType, orderedStats
+```
+
+**Notes:**
+- `TurretSelectionStore` follows the Store pattern: authoritative owner of selected turret type, fires `OnSelectionChanged` only on change. Constructor takes `defaultType` (no hardcoded value). Writer: `PresentationAdapter` (data-driven keyboard shortcuts 1-9 from `turretTypeOrder`). Readers: `PlacementSystem`, `GameUiCoordinator`.
+- `TurretTypeStats` is the single source of truth for per-type stats (including `Type` field). Built once at bootstrap by `TurretTypeDirectoryBuilder.TryBuild()` from `TurretDefinitions` SO entries. Passed to `PlacementSystem`, `EconomySystem`, and `TurretSelectionHud` as `IReadOnlyDictionary<TurretType, TurretTypeStats>` or `TurretTypeStats[]`.
+- `TurretDefinitions` is a single ScriptableObject containing an ordered array of `TurretTypeDefinition` structs. Array order determines default type (`[0]`), keyboard shortcuts (1-9), and HUD layout. `OnValidate()` also detects duplicate TurretType entries.
+- `TurretTypeDirectoryBuilder.TryBuild()` validates entries (null prefabs, duplicates) and returns a `TurretTypeDirectory` via single `out` parameter. `TurretTypeDirectory` is an immutable sealed class containing `OrderedTypes`, `OrderedStats`, `StatsByType`, `PrefabsByType`, and `DefaultType`. Pure C# static helper — unit-testable without Unity runtime.
+- Slow effect data propagates: `TurretTypeDefinition` → `TurretTypeStats` → `TurretSimData` → `ProjectileSimData` → `ProjectileHit` → `CreepSimData`. Each hop is at creation time except CreepSimData which is written by DamageSystem on hit.
+- `DamageSystem` is the single writer for `CreepSimData.SlowRemainingTime` and `SlowMultiplier`. `MovementSystem` reads them to compute effective speed.
+- `PresentationAdapter` manages turret pools via `IReadOnlyDictionary<TurretType, GameObjectPool> turretPoolByType`. Tracks per-turret visual info via a `Dictionary<int, TurretVisual>` (`turretVisuals`) where `TurretVisual` is a struct containing the GameObject and its source pool. Adding a new turret type requires zero code changes — just a definitions entry and prefab.
+
+### Slow Effect Sequence — Freezing Turret Hits Creep
+
+```mermaid
+sequenceDiagram
+    participant Bootstrap as GameFlowController
+    participant Move as MovementSystem
+    participant ProjSys as ProjectileSystem
+    participant DmgSys as DamageSystem
+    participant CStore as CreepStore
+    participant TStore as TurretStore
+    participant PStore as ProjectileStore
+
+    Note over Bootstrap: Frame N — freezing turret fires
+
+    Bootstrap->>Move: Tick(dt)
+    Note over Move: creep.SlowRemainingTime == 0 → full speed
+
+    Bootstrap->>ProjSys: Tick(dt)
+    Note over ProjSys: Turret fires projectile with SlowDuration, SlowMultiplier
+    ProjSys->>PStore: Add(projectile with slow params)
+    Note over ProjSys: Projectile hits within threshold
+    ProjSys->>PStore: RecordHit(ProjectileHit with slow params)
+    ProjSys->>PStore: MarkForRemoval(projId)
+
+    Bootstrap->>DmgSys: Tick(dt)
+    Note over DmgSys: TickSlowEffects(dt) — no active slows yet
+    Note over DmgSys: ProcessProjectileHits
+    DmgSys->>CStore: creep.Health -= hit.Damage
+    Note over DmgSys: Creep alive and hit.SlowDuration > 0
+    DmgSys->>CStore: creep.SlowRemainingTime = hit.SlowDuration
+    DmgSys->>CStore: creep.SlowMultiplier = hit.SlowMultiplier
+
+    Note over Bootstrap: Frame N+1 — creep moves slowly
+
+    Bootstrap->>Move: Tick(dt)
+    Note over Move: SlowRemainingTime > 0
+    Note over Move: effectiveSpeed = Speed * SlowMultiplier
+    Note over Move: Creep moves at reduced speed
+
+    Bootstrap->>DmgSys: Tick(dt)
+    Note over DmgSys: TickSlowEffects(dt)
+    DmgSys->>CStore: creep.SlowRemainingTime -= dt
+
+    Note over Bootstrap: Frame N+K — slow expires
+
+    Bootstrap->>DmgSys: Tick(dt)
+    Note over DmgSys: TickSlowEffects: SlowRemainingTime → 0 (clamped)
+
+    Note over Bootstrap: Frame N+K+1 — full speed
+
+    Bootstrap->>Move: Tick(dt)
+    Note over Move: SlowRemainingTime == 0 → full speed
+```
+
+**Key timing:**
+- **Frame N**: Projectile hits, DamageSystem applies slow to creep. Slow is NOT yet visible to MovementSystem (already ticked this frame in Phase 1).
+- **Frame N+1**: MovementSystem reads `SlowRemainingTime > 0`, computes effective speed. DamageSystem decrements timer.
+- **Frame N+K**: Timer reaches zero (clamped). Next frame's MovementSystem sees zero and uses full speed.
+- Effective slow duration is `[duration, duration + dt]` due to Phase 1/Phase 2 ordering. Consistent with next-frame visibility model.

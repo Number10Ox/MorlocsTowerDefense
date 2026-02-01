@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -6,9 +7,19 @@ public class TurretPlacementIntegrationTests
     private const int HIGH_STARTING_COINS = 1000;
     private const int DEFAULT_TURRET_COST = 5;
 
+    private static readonly TurretTypeStats DefaultStats = new TurretTypeStats(
+        TurretType.Regular, 10f, 1f, 1, 15f, DEFAULT_TURRET_COST);
+
+    private static readonly Dictionary<TurretType, TurretTypeStats> DefaultStatsByType =
+        new Dictionary<TurretType, TurretTypeStats>
+        {
+            { TurretType.Regular, DefaultStats }
+        };
+
     private TurretStore turretStore;
     private PlacementInput placementInput;
     private EconomyStore economyStore;
+    private TurretSelectionStore selectionStore;
     private PlacementSystem placementSystem;
 
     [SetUp]
@@ -17,15 +28,13 @@ public class TurretPlacementIntegrationTests
         turretStore = new TurretStore();
         placementInput = new PlacementInput();
         economyStore = new EconomyStore(HIGH_STARTING_COINS);
+        selectionStore = new TurretSelectionStore(TurretType.Regular);
         placementSystem = new PlacementSystem(
             turretStore,
             placementInput,
             economyStore,
-            turretRange: 10f,
-            turretFireInterval: 1f,
-            turretDamage: 1,
-            turretProjectileSpeed: 15f,
-            turretCost: DEFAULT_TURRET_COST);
+            selectionStore,
+            DefaultStatsByType);
     }
 
     [Test]
@@ -114,17 +123,15 @@ public class TurretPlacementIntegrationTests
     [Test]
     public void GameSessionBeginFrame_FlushesAllStores()
     {
-        var session = new GameSession(100, HIGH_STARTING_COINS);
+        var session = new GameSession(100, HIGH_STARTING_COINS, TurretType.Regular);
         var input = new PlacementInput();
+        var selStore = new TurretSelectionStore(TurretType.Regular);
         var system = new PlacementSystem(
             session.TurretStore,
             input,
             session.EconomyStore,
-            turretRange: 10f,
-            turretFireInterval: 1f,
-            turretDamage: 1,
-            turretProjectileSpeed: 15f,
-            turretCost: DEFAULT_TURRET_COST);
+            selStore,
+            DefaultStatsByType);
 
         input.PlaceRequested = true;
         input.WorldPosition = Vector3.forward;

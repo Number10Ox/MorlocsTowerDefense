@@ -1,5 +1,10 @@
 # Claude Code Rules
 
+## Environment
+
+- **Unity Editor path:** `/Applications/Unity/Unity.app`
+- **Unity CLI:** `/Applications/Unity/Unity.app/Contents/MacOS/Unity`
+
 ## Session Start
 
 At the start of each session, check for and read the following files if they exist:
@@ -184,4 +189,5 @@ Before a deliverable is considered complete:
 - No regressions in previously passing tests
 - TDD.md updated to reflect any architectural changes made during implementation
 - Architecture-Diagrams.md updated to reflect any structural changes (new classes, changed relationships, modified sequences)
+- README.md updated if any changes to other markdown documentation files affect it (e.g., new setup steps, changed project structure, new features that affect how the project is used or built)
 - Critical code review: systematic pass through all new/modified production files checking for bugs, single-writer violations, event lifecycle issues (subscribe/unsubscribe), frame-ordering correctness, null safety, and adherence to architectural constraints (no LINQ, no GetComponent in hot paths, simulation/presentation separation)

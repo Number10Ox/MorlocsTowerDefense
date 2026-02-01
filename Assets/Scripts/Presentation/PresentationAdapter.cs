@@ -5,26 +5,40 @@ using UnityEngine.InputSystem;
 using ObjectPooling;
 
 // Bridges simulation and Unity scene. Collects input into sim-readable structs,
-// syncs entity visuals from store change lists via object pools.
+// reads keyboard for turret type selection (data-driven), syncs entity visuals from store change lists via object pools.
 public class PresentationAdapter
 {
     private const int INITIAL_CREEP_MAP_CAPACITY = 32;
     private const int INITIAL_TURRET_MAP_CAPACITY = 16;
     private const int INITIAL_PROJECTILE_MAP_CAPACITY = 64;
 
+    private static readonly Key[] DIGIT_KEYS = new Key[]
+    {
+        Key.Digit1, Key.Digit2, Key.Digit3, Key.Digit4, Key.Digit5,
+        Key.Digit6, Key.Digit7, Key.Digit8, Key.Digit9
+    };
+
+    private struct TurretVisual
+    {
+        public TurretComponent Component;
+        public GameObjectPool SourcePool;
+    }
+
     private readonly CreepStore creepStore;
     private readonly GameObjectPool creepPool;
     private readonly Dictionary<int, CreepComponent> creepMap;
 
     private readonly TurretStore turretStore;
-    private readonly GameObjectPool turretPool;
-    private readonly Dictionary<int, TurretComponent> turretMap;
+    private readonly IReadOnlyDictionary<TurretType, GameObjectPool> turretPoolByType;
+    private readonly Dictionary<int, TurretVisual> turretVisuals;
 
     private readonly ProjectileStore projectileStore;
     private readonly GameObjectPool projectilePool;
     private readonly Dictionary<int, ProjectileComponent> projectileMap;
 
     private readonly PlacementInput placementInput;
+    private readonly TurretSelectionStore selectionStore;
+    private readonly TurretType[] turretTypeOrder;
     private readonly Camera camera;
     private readonly LayerMask terrainLayerMask;
 
@@ -32,31 +46,49 @@ public class PresentationAdapter
         CreepStore creepStore,
         GameObjectPool creepPool,
         TurretStore turretStore,
-        GameObjectPool turretPool,
+        IReadOnlyDictionary<TurretType, GameObjectPool> turretPoolByType,
         ProjectileStore projectileStore,
         GameObjectPool projectilePool,
         PlacementInput placementInput,
+        TurretSelectionStore selectionStore,
+        TurretType[] turretTypeOrder,
         Camera camera,
         LayerMask terrainLayerMask)
     {
         this.creepStore = creepStore ?? throw new ArgumentNullException(nameof(creepStore));
         this.creepPool = creepPool ?? throw new ArgumentNullException(nameof(creepPool));
         this.turretStore = turretStore ?? throw new ArgumentNullException(nameof(turretStore));
-        this.turretPool = turretPool ?? throw new ArgumentNullException(nameof(turretPool));
+        this.turretPoolByType = turretPoolByType ?? throw new ArgumentNullException(nameof(turretPoolByType));
         this.projectileStore = projectileStore ?? throw new ArgumentNullException(nameof(projectileStore));
         this.projectilePool = projectilePool ?? throw new ArgumentNullException(nameof(projectilePool));
         this.placementInput = placementInput ?? throw new ArgumentNullException(nameof(placementInput));
+        this.selectionStore = selectionStore ?? throw new ArgumentNullException(nameof(selectionStore));
+        this.turretTypeOrder = turretTypeOrder ?? throw new ArgumentNullException(nameof(turretTypeOrder));
         this.camera = camera ? camera : throw new ArgumentNullException(nameof(camera));
         this.terrainLayerMask = terrainLayerMask;
 
         creepMap = new Dictionary<int, CreepComponent>(INITIAL_CREEP_MAP_CAPACITY);
-        turretMap = new Dictionary<int, TurretComponent>(INITIAL_TURRET_MAP_CAPACITY);
+        turretVisuals = new Dictionary<int, TurretVisual>(INITIAL_TURRET_MAP_CAPACITY);
         projectileMap = new Dictionary<int, ProjectileComponent>(INITIAL_PROJECTILE_MAP_CAPACITY);
     }
 
     public void CollectInput()
     {
         placementInput.Clear();
+
+        var keyboard = Keyboard.current;
+        if (keyboard != null)
+        {
+            int maxKeys = Math.Min(turretTypeOrder.Length, DIGIT_KEYS.Length);
+            for (int i = 0; i < maxKeys; i++)
+            {
+                if (keyboard[DIGIT_KEYS[i]].wasPressedThisFrame)
+                {
+                    selectionStore.SelectType(turretTypeOrder[i]);
+                    break;
+                }
+            }
+        }
 
         var mouse = Mouse.current;
         if (mouse == null) return;
@@ -86,7 +118,7 @@ public class PresentationAdapter
     public void ResetVisuals()
     {
         ReturnAllToPool(creepMap, creepPool);
-        ReturnAllToPool(turretMap, turretPool);
+        ReturnTurretsToSourcePools();
         ReturnAllToPool(projectileMap, projectilePool);
     }
 
@@ -148,21 +180,31 @@ public class PresentationAdapter
         for (int i = 0; i < placed.Count; i++)
         {
             TurretSimData turret = placed[i];
-            GameObject go = turretPool.Acquire(turret.Position);
+            if (!turretPoolByType.TryGetValue(turret.Type, out GameObjectPool pool))
+            {
+                Debug.LogWarning($"PresentationAdapter: No pool for TurretType {turret.Type}.");
+                continue;
+            }
+            GameObject go = pool.Acquire(turret.Position);
             if (go.TryGetComponent(out TurretComponent comp))
             {
-                if (turretMap.ContainsKey(turret.Id))
+                if (turretVisuals.TryGetValue(turret.Id, out TurretVisual oldVisual))
                 {
-                    Debug.LogWarning($"PresentationAdapter: Duplicate turret Id={turret.Id}. Overwriting visual binding.");
+                    Debug.LogWarning($"PresentationAdapter: Duplicate turret Id={turret.Id}. Returning previous GO.");
+                    oldVisual.SourcePool.Return(oldVisual.Component.gameObject);
                 }
 
                 comp.Initialize(turret.Id);
-                turretMap[turret.Id] = comp;
+                turretVisuals[turret.Id] = new TurretVisual
+                {
+                    Component = comp,
+                    SourcePool = pool
+                };
             }
             else
             {
                 Debug.LogError($"PresentationAdapter: Turret prefab is missing TurretComponent. Id={turret.Id}");
-                turretPool.Return(go);
+                pool.Return(go);
             }
         }
     }
@@ -217,6 +259,16 @@ public class PresentationAdapter
                 comp.transform.position = projectile.Position;
             }
         }
+    }
+
+    private void ReturnTurretsToSourcePools()
+    {
+        foreach (var kvp in turretVisuals)
+        {
+            kvp.Value.SourcePool.Return(kvp.Value.Component.gameObject);
+        }
+
+        turretVisuals.Clear();
     }
 
     private void ReturnAllToPool<T>(Dictionary<int, T> map, GameObjectPool pool) where T : Component

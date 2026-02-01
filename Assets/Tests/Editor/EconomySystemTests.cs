@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -7,6 +8,15 @@ public class EconomySystemTests
     private const int STARTING_COINS = 20;
     private const int TURRET_COST = 5;
     private const int COIN_REWARD = 1;
+
+    private static readonly TurretTypeStats DefaultStats = new TurretTypeStats(
+        TurretType.Regular, 10f, 1f, 1, 15f, TURRET_COST);
+
+    private static readonly Dictionary<TurretType, TurretTypeStats> DefaultStatsByType =
+        new Dictionary<TurretType, TurretTypeStats>
+        {
+            { TurretType.Regular, DefaultStats }
+        };
 
     private EconomyStore economyStore;
     private TurretStore turretStore;
@@ -17,7 +27,7 @@ public class EconomySystemTests
     {
         economyStore = new EconomyStore(STARTING_COINS);
         turretStore = new TurretStore();
-        economySystem = new EconomySystem(economyStore, turretStore, TURRET_COST);
+        economySystem = new EconomySystem(economyStore, turretStore, DefaultStatsByType);
     }
 
     // --- Constructor ---
@@ -25,13 +35,13 @@ public class EconomySystemTests
     [Test]
     public void Constructor_NullEconomyStore_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => new EconomySystem(null, turretStore, TURRET_COST));
+        Assert.Throws<ArgumentNullException>(() => new EconomySystem(null, turretStore, DefaultStatsByType));
     }
 
     [Test]
     public void Constructor_NullTurretStore_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => new EconomySystem(economyStore, null, TURRET_COST));
+        Assert.Throws<ArgumentNullException>(() => new EconomySystem(economyStore, null, DefaultStatsByType));
     }
 
     // --- Creep Kill Credits ---
@@ -140,9 +150,12 @@ public class EconomySystemTests
     [Test]
     public void Tick_CreditsEnablePlacement_TrySpendSucceeds()
     {
+        // Tests EconomySystem's internal ordering: credits applied before debits within Tick().
+        // In real gameplay, PlacementSystem gates on CanAfford() in Phase 1 using the prior
+        // frame's balance, so kill rewards from Phase 3 cannot fund same-frame placement.
         // Start with exactly the turret cost, kill adds 1 more
         var tightStore = new EconomyStore(TURRET_COST);
-        var system = new EconomySystem(tightStore, turretStore, TURRET_COST);
+        var system = new EconomySystem(tightStore, turretStore, DefaultStatsByType);
 
         system.HandleCreepKilled(0, COIN_REWARD);
         turretStore.Add(MakeTurret(0));

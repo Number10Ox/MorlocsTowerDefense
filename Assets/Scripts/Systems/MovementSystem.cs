@@ -52,7 +52,8 @@ public class MovementSystem : IGameSystem
             }
 
             float distance = Mathf.Sqrt(distSq);
-            float stepDistance = creep.Speed * deltaTime;
+            float speedMultiplier = creep.SlowRemainingTime > 0f ? creep.SlowMultiplier : 1f;
+            float stepDistance = creep.Speed * speedMultiplier * deltaTime;
 
             if (stepDistance >= distance)
             {

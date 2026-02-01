@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -12,11 +13,10 @@ public class GameFlowController : MonoBehaviour
     [SerializeField] private HomeBaseComponent homeBase;
     [SerializeField] private SpawnPointComponent[] spawnPoints;
     [SerializeField] private GameObject creepPrefab;
-    [SerializeField] private GameObject turretPrefab;
     [SerializeField] private GameObject projectilePrefab;
     [SerializeField] private SpawnConfig spawnConfig;
     [SerializeField] private CreepDef creepDef;
-    [SerializeField] private TurretDef turretDef;
+    [SerializeField] private TurretDefinitions turretDefinitions;
     [SerializeField] private BaseConfig baseConfig;
     [SerializeField] private EconomyConfig economyConfig;
     [SerializeField] private LayerMask terrainLayerMask;
@@ -45,13 +45,6 @@ public class GameFlowController : MonoBehaviour
             return;
         }
 
-        if (turretPrefab == null)
-        {
-            Debug.LogError("GameFlowController: Turret prefab reference is not assigned.");
-            enabled = false;
-            return;
-        }
-
         if (projectilePrefab == null)
         {
             Debug.LogError("GameFlowController: Projectile prefab reference is not assigned.");
@@ -73,9 +66,9 @@ public class GameFlowController : MonoBehaviour
             return;
         }
 
-        if (turretDef == null)
+        if (turretDefinitions == null)
         {
-            Debug.LogError("GameFlowController: TurretDef reference is not assigned.");
+            Debug.LogError("GameFlowController: TurretDefinitions reference is not assigned.");
             enabled = false;
             return;
         }
@@ -107,10 +100,21 @@ public class GameFlowController : MonoBehaviour
             return;
         }
 
+        if (!TurretTypeDirectoryBuilder.TryBuild(
+            turretDefinitions.Entries,
+            out TurretTypeDirectory turretDirectory,
+            out string catalogError))
+        {
+            Debug.LogError($"GameFlowController: {catalogError}");
+            enabled = false;
+            return;
+        }
+
         Vector3 basePosition = homeBase.transform.position;
         Vector3[] spawnPositions = ExtractSpawnPositions();
 
-        gameSession = new GameSession(baseConfig.MaxHealth, economyConfig.StartingCoins);
+        TurretType defaultType = turretDirectory.DefaultType;
+        gameSession = new GameSession(baseConfig.MaxHealth, economyConfig.StartingCoins, defaultType);
 
         // Phase 1 — World Update
         var spawnSystem = new SpawnSystem(
@@ -131,11 +135,8 @@ public class GameFlowController : MonoBehaviour
             gameSession.TurretStore,
             placementInput,
             gameSession.EconomyStore,
-            turretDef.Range,
-            turretDef.FireInterval,
-            turretDef.Damage,
-            turretDef.ProjectileSpeed,
-            turretDef.Cost);
+            gameSession.TurretSelectionStore,
+            turretDirectory.StatsByType);
 
         // Phase 2 — Combat
         var projectileSystem = new ProjectileSystem(
@@ -152,24 +153,33 @@ public class GameFlowController : MonoBehaviour
         var economySystem = new EconomySystem(
             gameSession.EconomyStore,
             gameSession.TurretStore,
-            turretDef.Cost);
+            turretDirectory.StatsByType);
 
         damageSystem.OnCreepKilled += economySystem.HandleCreepKilled;
 
         int creepPoolSize = (spawnPositions.Length > 0 ? spawnPositions.Length : 1)
                             * spawnConfig.CreepsPerSpawn * POOL_SIZE_MULTIPLIER;
         var creepPool = new ObjectPooling.GameObjectPool(creepPrefab, creepPoolSize, transform);
-        var turretPool = new ObjectPooling.GameObjectPool(turretPrefab, INITIAL_TURRET_POOL_SIZE, transform);
+
+        var turretPoolByType = new Dictionary<TurretType, ObjectPooling.GameObjectPool>(turretDirectory.PrefabsByType.Count);
+        foreach (var kvp in turretDirectory.PrefabsByType)
+        {
+            turretPoolByType[kvp.Key] =
+                new ObjectPooling.GameObjectPool(kvp.Value, INITIAL_TURRET_POOL_SIZE, transform);
+        }
+
         var projectilePool = new ObjectPooling.GameObjectPool(projectilePrefab, INITIAL_PROJECTILE_POOL_SIZE, transform);
 
         presentationAdapter = new PresentationAdapter(
             gameSession.CreepStore,
             creepPool,
             gameSession.TurretStore,
-            turretPool,
+            turretPoolByType,
             gameSession.ProjectileStore,
             projectilePool,
             placementInput,
+            gameSession.TurretSelectionStore,
+            turretDirectory.OrderedTypes,
             mainCamera,
             terrainLayerMask);
 
@@ -200,18 +210,22 @@ public class GameFlowController : MonoBehaviour
 
         BaseHealthHud baseHealthHud = null;
         CoinHud coinHud = null;
+        TurretSelectionHud turretSelectionHud = null;
         if (hudDocument != null)
         {
             baseHealthHud = new BaseHealthHud(hudDocument);
             coinHud = new CoinHud(hudDocument);
+            turretSelectionHud = new TurretSelectionHud(hudDocument, turretDirectory.OrderedStats, defaultType);
         }
 
         uiCoordinator = new GameUiCoordinator(
             stateMachine,
             gameSession.BaseStore,
             gameSession.EconomyStore,
+            gameSession.TurretSelectionStore,
             baseHealthHud,
             coinHud,
+            turretSelectionHud,
             losePopupPrefab,
             transform);
     }

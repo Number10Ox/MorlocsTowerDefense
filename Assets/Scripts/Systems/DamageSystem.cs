@@ -1,7 +1,8 @@
 using System;
 
-// Two-phase damage: projectile hits then base damage.
-// Single writer for CreepSimData.Health and BaseStore. Fires OnCreepKilled.
+// Three-phase damage: tick slow effects, projectile hits, then base damage.
+// Single writer for CreepSimData.Health, CreepSimData.SlowRemainingTime/SlowMultiplier, and BaseStore.
+// Fires OnCreepKilled.
 public class DamageSystem : IGameSystem
 {
     private readonly CreepStore creepStore;
@@ -19,8 +20,26 @@ public class DamageSystem : IGameSystem
 
     public void Tick(float deltaTime)
     {
+        TickSlowEffects(deltaTime);
         ProcessProjectileHits();
         ProcessBaseDamage();
+    }
+
+    private void TickSlowEffects(float deltaTime)
+    {
+        var creeps = creepStore.ActiveCreeps;
+        for (int i = 0; i < creeps.Count; i++)
+        {
+            CreepSimData creep = creeps[i];
+            if (creep.Health <= 0) continue;
+            if (creep.SlowRemainingTime <= 0f) continue;
+
+            creep.SlowRemainingTime -= deltaTime;
+            if (creep.SlowRemainingTime < 0f)
+            {
+                creep.SlowRemainingTime = 0f;
+            }
+        }
     }
 
     private void ProcessProjectileHits()
@@ -39,6 +58,11 @@ public class DamageSystem : IGameSystem
             {
                 creepStore.MarkForRemoval(creep.Id);
                 OnCreepKilled?.Invoke(creep.Id, creep.CoinReward);
+            }
+            else if (hit.SlowDuration > 0f)
+            {
+                creep.SlowRemainingTime = hit.SlowDuration;
+                creep.SlowMultiplier = hit.SlowMultiplier;
             }
         }
     }

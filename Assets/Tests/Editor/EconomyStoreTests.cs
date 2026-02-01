@@ -156,12 +156,16 @@ public class EconomyStoreTests
     }
 
     [Test]
-    public void TrySpendCoins_ZeroAmount_ReturnsFalse()
+    public void TrySpendCoins_ZeroAmount_ReturnsTrue_NoMutation()
     {
+        int fireCount = 0;
+        store.OnCoinsChanged += _ => fireCount++;
+
         bool result = store.TrySpendCoins(0);
 
-        Assert.IsFalse(result);
+        Assert.IsTrue(result);
         Assert.AreEqual(DEFAULT_STARTING_COINS, store.CurrentCoins);
+        Assert.AreEqual(0, fireCount);
     }
 
     [Test]

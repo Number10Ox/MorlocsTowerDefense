@@ -37,7 +37,8 @@ public class EconomyStore
 
     public bool TrySpendCoins(int amount)
     {
-        if (amount <= 0) return false;
+        if (amount < 0) return false;
+        if (amount == 0) return true;
         if (currentCoins < amount) return false;
 
         currentCoins -= amount;
