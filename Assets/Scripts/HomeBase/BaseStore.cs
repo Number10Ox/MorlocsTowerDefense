@@ -29,10 +29,9 @@ public class BaseStore
         if (amount <= 0) return;
         if (currentHealth <= 0) return;
 
-        currentHealth -= amount;
-        if (currentHealth < 0) currentHealth = 0;
-
-        damageTakenThisFrame += amount;
+        int effectiveDamage = amount > currentHealth ? currentHealth : amount;
+        currentHealth -= effectiveDamage;
+        damageTakenThisFrame += effectiveDamage;
 
         OnBaseHealthChanged?.Invoke(currentHealth, maxHealth);
     }

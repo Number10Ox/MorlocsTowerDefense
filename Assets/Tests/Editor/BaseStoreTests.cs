@@ -163,6 +163,19 @@ public class BaseStoreTests
     }
 
     [Test]
+    public void DamageTakenThisFrame_OverkillDamage_TracksEffectiveDamageOnly()
+    {
+        store.ApplyDamage(70);
+        store.BeginFrame();
+
+        // 30 HP remaining, deal 50 damage — only 30 is effective
+        store.ApplyDamage(50);
+
+        Assert.AreEqual(30, store.DamageTakenThisFrame);
+        Assert.AreEqual(0, store.CurrentHealth);
+    }
+
+    [Test]
     public void DamageTakenThisFrame_AlreadyDestroyed_DoesNotAccumulate()
     {
         store.ApplyDamage(DEFAULT_MAX_HEALTH);
