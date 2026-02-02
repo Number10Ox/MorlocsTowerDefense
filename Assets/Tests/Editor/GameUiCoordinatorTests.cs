@@ -34,27 +34,43 @@ public class GameUiCoordinatorTests
     public void Constructor_NullStateMachine_ThrowsArgumentNullException()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            new GameUiCoordinator(null, baseStore, economyStore, null, null, null, null, null, null, null, null));
+            new GameUiCoordinator(
+                null,
+                new GameUiCoordinator.StoreDeps(baseStore, economyStore, null),
+                default,
+                default));
     }
 
     [Test]
     public void Constructor_NullBaseStore_ThrowsArgumentNullException()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            new GameUiCoordinator(stateMachine, null, economyStore, null, null, null, null, null, null, null, null));
+            new GameUiCoordinator(
+                stateMachine,
+                new GameUiCoordinator.StoreDeps(null, economyStore, null),
+                default,
+                default));
     }
 
     [Test]
     public void Constructor_NullEconomyStore_ThrowsArgumentNullException()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            new GameUiCoordinator(stateMachine, baseStore, null, null, null, null, null, null, null, null, null));
+            new GameUiCoordinator(
+                stateMachine,
+                new GameUiCoordinator.StoreDeps(baseStore, null, null),
+                default,
+                default));
     }
 
     [Test]
     public void Teardown_CalledTwice_NoException()
     {
-        var coordinator = new GameUiCoordinator(stateMachine, baseStore, economyStore, null, null, null, null, null, null, null, null);
+        var coordinator = new GameUiCoordinator(
+                stateMachine,
+                new GameUiCoordinator.StoreDeps(baseStore, economyStore, null),
+                default,
+                default);
 
         Assert.DoesNotThrow(() =>
         {
@@ -68,7 +84,11 @@ public class GameUiCoordinatorTests
     {
         LogAssert.Expect(LogType.Error, "InitState: HomeBaseComponent reference is null. Scene setup is invalid.");
         stateMachine.Start(GameState.Init);
-        var coordinator = new GameUiCoordinator(stateMachine, baseStore, economyStore, null, null, null, null, null, null, null, null);
+        var coordinator = new GameUiCoordinator(
+                stateMachine,
+                new GameUiCoordinator.StoreDeps(baseStore, economyStore, null),
+                default,
+                default);
 
         Assert.DoesNotThrow(() => coordinator.Refresh());
     }
@@ -78,7 +98,11 @@ public class GameUiCoordinatorTests
     {
         LogAssert.Expect(LogType.Error, "InitState: HomeBaseComponent reference is null. Scene setup is invalid.");
         stateMachine.Start(GameState.Init);
-        var coordinator = new GameUiCoordinator(stateMachine, baseStore, economyStore, null, null, null, null, null, null, null, null);
+        var coordinator = new GameUiCoordinator(
+                stateMachine,
+                new GameUiCoordinator.StoreDeps(baseStore, economyStore, null),
+                default,
+                default);
 
         Assert.DoesNotThrow(() =>
         {
@@ -94,7 +118,11 @@ public class GameUiCoordinatorTests
     {
         LogAssert.Expect(LogType.Error, "InitState: HomeBaseComponent reference is null. Scene setup is invalid.");
         stateMachine.Start(GameState.Init);
-        var coordinator = new GameUiCoordinator(stateMachine, baseStore, economyStore, null, null, null, null, null, null, null, null);
+        var coordinator = new GameUiCoordinator(
+                stateMachine,
+                new GameUiCoordinator.StoreDeps(baseStore, economyStore, null),
+                default,
+                default);
 
         coordinator.Teardown();
 
@@ -109,7 +137,11 @@ public class GameUiCoordinatorTests
     [Test]
     public void Teardown_UnsubscribesFromBaseHealthChanged()
     {
-        var coordinator = new GameUiCoordinator(stateMachine, baseStore, economyStore, null, null, null, null, null, null, null, null);
+        var coordinator = new GameUiCoordinator(
+                stateMachine,
+                new GameUiCoordinator.StoreDeps(baseStore, economyStore, null),
+                default,
+                default);
 
         coordinator.Teardown();
 
@@ -120,7 +152,11 @@ public class GameUiCoordinatorTests
     [Test]
     public void Teardown_UnsubscribesFromCoinsChanged()
     {
-        var coordinator = new GameUiCoordinator(stateMachine, baseStore, economyStore, null, null, null, null, null, null, null, null);
+        var coordinator = new GameUiCoordinator(
+                stateMachine,
+                new GameUiCoordinator.StoreDeps(baseStore, economyStore, null),
+                default,
+                default);
 
         coordinator.Teardown();
 

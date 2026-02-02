@@ -105,10 +105,6 @@
 - **State machine trigger-during-Enter bug fix**: `GameStateMachine.Tick()` was clearing `pendingTrigger` AFTER `ResolveTrigger()`, which wiped triggers fired during `Enter()` (e.g., `InitState` fires `SceneValidated`). Fixed by clearing BEFORE calling `ResolveTrigger()`.
 - **RestartHintHud**: UI Toolkit element in shared UXML. Visible only in Win/Lose states. Mirrors CoinHud/BaseHealthHud pattern (queries named elements from UIDocument, `SetVisible(bool)` toggle).
 
-## TODOs (post story sign-off)
-
-- **Refactor GameUiCoordinator constructor**: Currently 11 parameters — violates the 6+ parameter smell rule added to CLAUDE.md. Group into nested `readonly record struct` bundles (e.g., `Stores`, `Huds`, `Popups`). Tests should pass `default` for irrelevant bundles instead of long `null` trails. Also audit other constructors in the codebase for the same issue.
-
 ## Open Questions
 
 - Addressables loading infrastructure (deferred until extensibility is needed)

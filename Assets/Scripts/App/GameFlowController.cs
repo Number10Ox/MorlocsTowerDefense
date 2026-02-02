@@ -194,17 +194,21 @@ public class GameFlowController : MonoBehaviour
         var projectilePool = new ObjectPooling.GameObjectPool(projectilePrefab, INITIAL_PROJECTILE_POOL_SIZE, transform);
 
         presentationAdapter = new PresentationAdapter(
-            gameSession.CreepStore,
-            creepPoolByType,
-            gameSession.TurretStore,
-            turretPoolByType,
-            gameSession.ProjectileStore,
-            projectilePool,
-            placementInput,
-            gameSession.TurretSelectionStore,
-            turretDirectory.OrderedTypes,
-            mainCamera,
-            terrainLayerMask);
+            new PresentationAdapter.StoreDeps(
+                gameSession.CreepStore,
+                gameSession.TurretStore,
+                gameSession.ProjectileStore),
+            new PresentationAdapter.PoolDeps(
+                creepPoolByType,
+                turretPoolByType,
+                projectilePool),
+            new PresentationAdapter.InputDeps(
+                placementInput,
+                gameSession.TurretSelectionStore,
+                turretDirectory.OrderedTypes),
+            new PresentationAdapter.SceneDeps(
+                mainCamera,
+                terrainLayerMask));
 
         systemScheduler = new SystemScheduler(new IGameSystem[]
         {
@@ -250,16 +254,19 @@ public class GameFlowController : MonoBehaviour
 
         uiCoordinator = new GameUiCoordinator(
             stateMachine,
-            gameSession.BaseStore,
-            gameSession.EconomyStore,
-            gameSession.TurretSelectionStore,
-            baseHealthHud,
-            coinHud,
-            turretSelectionHud,
-            restartHintHud,
-            losePopupPrefab,
-            winPopupPrefab,
-            transform);
+            new GameUiCoordinator.StoreDeps(
+                gameSession.BaseStore,
+                gameSession.EconomyStore,
+                gameSession.TurretSelectionStore),
+            new GameUiCoordinator.HudDeps(
+                baseHealthHud,
+                coinHud,
+                turretSelectionHud,
+                restartHintHud),
+            new GameUiCoordinator.PopupDeps(
+                losePopupPrefab,
+                winPopupPrefab,
+                transform));
     }
 
     private void Start()

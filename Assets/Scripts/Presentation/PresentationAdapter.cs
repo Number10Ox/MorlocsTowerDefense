@@ -8,6 +8,63 @@ using ObjectPooling;
 // reads keyboard for turret type selection (data-driven), syncs entity visuals from store change lists via object pools.
 public class PresentationAdapter
 {
+    public readonly struct StoreDeps
+    {
+        public readonly CreepStore CreepStore;
+        public readonly TurretStore TurretStore;
+        public readonly ProjectileStore ProjectileStore;
+
+        public StoreDeps(CreepStore creepStore, TurretStore turretStore, ProjectileStore projectileStore)
+        {
+            CreepStore = creepStore;
+            TurretStore = turretStore;
+            ProjectileStore = projectileStore;
+        }
+    }
+
+    public readonly struct PoolDeps
+    {
+        public readonly IReadOnlyDictionary<CreepType, GameObjectPool> CreepPoolByType;
+        public readonly IReadOnlyDictionary<TurretType, GameObjectPool> TurretPoolByType;
+        public readonly GameObjectPool ProjectilePool;
+
+        public PoolDeps(
+            IReadOnlyDictionary<CreepType, GameObjectPool> creepPoolByType,
+            IReadOnlyDictionary<TurretType, GameObjectPool> turretPoolByType,
+            GameObjectPool projectilePool)
+        {
+            CreepPoolByType = creepPoolByType;
+            TurretPoolByType = turretPoolByType;
+            ProjectilePool = projectilePool;
+        }
+    }
+
+    public readonly struct InputDeps
+    {
+        public readonly PlacementInput PlacementInput;
+        public readonly TurretSelectionStore SelectionStore;
+        public readonly TurretType[] TurretTypeOrder;
+
+        public InputDeps(PlacementInput placementInput, TurretSelectionStore selectionStore, TurretType[] turretTypeOrder)
+        {
+            PlacementInput = placementInput;
+            SelectionStore = selectionStore;
+            TurretTypeOrder = turretTypeOrder;
+        }
+    }
+
+    public readonly struct SceneDeps
+    {
+        public readonly Camera Camera;
+        public readonly LayerMask TerrainLayerMask;
+
+        public SceneDeps(Camera camera, LayerMask terrainLayerMask)
+        {
+            Camera = camera;
+            TerrainLayerMask = terrainLayerMask;
+        }
+    }
+
     private const int INITIAL_CREEP_MAP_CAPACITY = 32;
     private const int INITIAL_TURRET_MAP_CAPACITY = 16;
     private const int INITIAL_PROJECTILE_MAP_CAPACITY = 64;
@@ -49,29 +106,22 @@ public class PresentationAdapter
     private readonly LayerMask terrainLayerMask;
 
     public PresentationAdapter(
-        CreepStore creepStore,
-        IReadOnlyDictionary<CreepType, GameObjectPool> creepPoolByType,
-        TurretStore turretStore,
-        IReadOnlyDictionary<TurretType, GameObjectPool> turretPoolByType,
-        ProjectileStore projectileStore,
-        GameObjectPool projectilePool,
-        PlacementInput placementInput,
-        TurretSelectionStore selectionStore,
-        TurretType[] turretTypeOrder,
-        Camera camera,
-        LayerMask terrainLayerMask)
+        StoreDeps stores,
+        PoolDeps pools,
+        InputDeps input,
+        SceneDeps scene)
     {
-        this.creepStore = creepStore ?? throw new ArgumentNullException(nameof(creepStore));
-        this.creepPoolByType = creepPoolByType ?? throw new ArgumentNullException(nameof(creepPoolByType));
-        this.turretStore = turretStore ?? throw new ArgumentNullException(nameof(turretStore));
-        this.turretPoolByType = turretPoolByType ?? throw new ArgumentNullException(nameof(turretPoolByType));
-        this.projectileStore = projectileStore ?? throw new ArgumentNullException(nameof(projectileStore));
-        this.projectilePool = projectilePool ?? throw new ArgumentNullException(nameof(projectilePool));
-        this.placementInput = placementInput ?? throw new ArgumentNullException(nameof(placementInput));
-        this.selectionStore = selectionStore ?? throw new ArgumentNullException(nameof(selectionStore));
-        this.turretTypeOrder = turretTypeOrder ?? throw new ArgumentNullException(nameof(turretTypeOrder));
-        this.camera = camera ? camera : throw new ArgumentNullException(nameof(camera));
-        this.terrainLayerMask = terrainLayerMask;
+        this.creepStore = stores.CreepStore ?? throw new ArgumentNullException(nameof(stores.CreepStore));
+        this.turretStore = stores.TurretStore ?? throw new ArgumentNullException(nameof(stores.TurretStore));
+        this.projectileStore = stores.ProjectileStore ?? throw new ArgumentNullException(nameof(stores.ProjectileStore));
+        this.creepPoolByType = pools.CreepPoolByType ?? throw new ArgumentNullException(nameof(pools.CreepPoolByType));
+        this.turretPoolByType = pools.TurretPoolByType ?? throw new ArgumentNullException(nameof(pools.TurretPoolByType));
+        this.projectilePool = pools.ProjectilePool ?? throw new ArgumentNullException(nameof(pools.ProjectilePool));
+        this.placementInput = input.PlacementInput ?? throw new ArgumentNullException(nameof(input.PlacementInput));
+        this.selectionStore = input.SelectionStore ?? throw new ArgumentNullException(nameof(input.SelectionStore));
+        this.turretTypeOrder = input.TurretTypeOrder ?? throw new ArgumentNullException(nameof(input.TurretTypeOrder));
+        this.camera = scene.Camera ? scene.Camera : throw new ArgumentNullException(nameof(scene.Camera));
+        this.terrainLayerMask = scene.TerrainLayerMask;
 
         creepVisuals = new Dictionary<int, CreepVisual>(INITIAL_CREEP_MAP_CAPACITY);
         turretVisuals = new Dictionary<int, TurretVisual>(INITIAL_TURRET_MAP_CAPACITY);

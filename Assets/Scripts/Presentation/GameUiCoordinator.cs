@@ -5,6 +5,50 @@ using UnityEngine;
 // Subscribes to state machine, store events, and turret selection events. No simulation writes.
 public class GameUiCoordinator
 {
+    public readonly struct StoreDeps
+    {
+        public readonly BaseStore BaseStore;
+        public readonly EconomyStore EconomyStore;
+        public readonly TurretSelectionStore SelectionStore;
+
+        public StoreDeps(BaseStore baseStore, EconomyStore economyStore, TurretSelectionStore selectionStore)
+        {
+            BaseStore = baseStore;
+            EconomyStore = economyStore;
+            SelectionStore = selectionStore;
+        }
+    }
+
+    public readonly struct HudDeps
+    {
+        public readonly BaseHealthHud BaseHealthHud;
+        public readonly CoinHud CoinHud;
+        public readonly TurretSelectionHud TurretSelectionHud;
+        public readonly RestartHintHud RestartHintHud;
+
+        public HudDeps(BaseHealthHud baseHealthHud, CoinHud coinHud, TurretSelectionHud turretSelectionHud, RestartHintHud restartHintHud)
+        {
+            BaseHealthHud = baseHealthHud;
+            CoinHud = coinHud;
+            TurretSelectionHud = turretSelectionHud;
+            RestartHintHud = restartHintHud;
+        }
+    }
+
+    public readonly struct PopupDeps
+    {
+        public readonly GameObject LosePopupPrefab;
+        public readonly GameObject WinPopupPrefab;
+        public readonly Transform PopupParent;
+
+        public PopupDeps(GameObject losePopupPrefab, GameObject winPopupPrefab, Transform popupParent)
+        {
+            LosePopupPrefab = losePopupPrefab;
+            WinPopupPrefab = winPopupPrefab;
+            PopupParent = popupParent;
+        }
+    }
+
     private GameStateMachine stateMachine;
     private BaseStore baseStore;
     private EconomyStore economyStore;
@@ -22,28 +66,21 @@ public class GameUiCoordinator
 
     public GameUiCoordinator(
         GameStateMachine stateMachine,
-        BaseStore baseStore,
-        EconomyStore economyStore,
-        TurretSelectionStore selectionStore,
-        BaseHealthHud baseHealthHud,
-        CoinHud coinHud,
-        TurretSelectionHud turretSelectionHud,
-        RestartHintHud restartHintHud,
-        GameObject losePopupPrefab,
-        GameObject winPopupPrefab,
-        Transform popupParent)
+        StoreDeps stores,
+        HudDeps huds,
+        PopupDeps popups)
     {
         this.stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
-        this.baseStore = baseStore ?? throw new ArgumentNullException(nameof(baseStore));
-        this.economyStore = economyStore ?? throw new ArgumentNullException(nameof(economyStore));
-        this.selectionStore = selectionStore;
-        this.baseHealthHud = baseHealthHud;
-        this.coinHud = coinHud;
-        this.turretSelectionHud = turretSelectionHud;
-        this.restartHintHud = restartHintHud;
-        this.losePopupPrefab = losePopupPrefab;
-        this.winPopupPrefab = winPopupPrefab;
-        this.popupParent = popupParent;
+        this.baseStore = stores.BaseStore ?? throw new ArgumentNullException(nameof(stores.BaseStore));
+        this.economyStore = stores.EconomyStore ?? throw new ArgumentNullException(nameof(stores.EconomyStore));
+        this.selectionStore = stores.SelectionStore;
+        this.baseHealthHud = huds.BaseHealthHud;
+        this.coinHud = huds.CoinHud;
+        this.turretSelectionHud = huds.TurretSelectionHud;
+        this.restartHintHud = huds.RestartHintHud;
+        this.losePopupPrefab = popups.LosePopupPrefab;
+        this.winPopupPrefab = popups.WinPopupPrefab;
+        this.popupParent = popups.PopupParent;
 
         stateMachine.OnStateChanged += OnStateChanged;
 
