@@ -36,10 +36,10 @@ See [Architecture Diagrams](Architecture-Diagrams.md) for class diagrams, state 
 
 #### Composition Root & Game Loop
 
-A single `GameFlowController` MonoBehaviour in MainScene serves as the entry point and composition root. It creates the `GameSession` (which owns all stores), the `GameStateMachine`, all `IGameState` implementations, the `SystemScheduler`, and all gameplay systems. `Update()` ticks the state machine for flow control, calls `GameSession.BeginFrame()` to flush deferred store operations, then ticks the system scheduler when in gameplay states.
+A single `GameFlowController` MonoBehaviour in MainScene serves as the entry point and composition root. It creates the `GameSession` (which owns all stores), the `GameStateMachine`, all `IGameState` implementations, the `SystemScheduler`, and all gameplay systems. `Update()` ticks the state machine for flow control, calls `GameSession.BeginFrame()` every frame as housekeeping (flush deferred removals, clear per-frame change lists), then ticks the system scheduler when in gameplay states.
 
 ```
-GameFlowController.Update() → GameStateMachine.Tick() → GameSession.BeginFrame() → SystemScheduler.Tick() (gated by state) → PresentationAdapter.SyncVisuals()
+GameFlowController.Update() → GameStateMachine.Tick() → GameSession.BeginFrame() → SystemScheduler.Tick() (gated by Playing) → PresentationAdapter.SyncVisuals()
 ```
 
 #### Class Responsibilities
@@ -142,9 +142,10 @@ if ((currentState == Win || currentState == Lose) && placementInput.RestartReque
 
 stateMachine.Tick(Time.deltaTime);      // Resolves pending triggers, ticks current state
 
+gameSession.BeginFrame();               // Flush deferred removals, clear frame lists (every frame)
+
 if (stateMachine.CurrentStateId == GameState.Playing)
 {
-    gameSession.BeginFrame();           // Flush deferred removals, clear frame lists
     systemScheduler.Tick(Time.deltaTime);
 }
 

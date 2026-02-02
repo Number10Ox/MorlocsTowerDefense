@@ -290,9 +290,12 @@ public class GameFlowController : MonoBehaviour
         // occurs this frame, systems won't tick until the next frame.
         stateMachine.Tick(Time.deltaTime);
 
+        // Housekeeping runs every frame: clears per-frame change lists and flushes
+        // deferred removals so SyncVisuals never reprocesses stale data.
+        gameSession.BeginFrame();
+
         if (stateMachine.CurrentStateId == GameState.Playing)
         {
-            gameSession.BeginFrame();
             systemScheduler.Tick(Time.deltaTime);
         }
 
