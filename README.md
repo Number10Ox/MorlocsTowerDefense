@@ -49,14 +49,9 @@ Creep attributes (speed, HP, damage to base, coin reward) are configured via the
 
 1. Open the project in Unity
 2. Open `MainScene`
-3. On the `GameFlowController` GameObject, assign:
-   - TurretDefinitions ScriptableObject
-   - CreepDefinitions ScriptableObject
-   - WaveConfig, BaseConfig, EconomyConfig SOs
-   - Turret, creep, and projectile prefabs (assigned in definitions SOs)
-   - HomeBase, SpawnPoints, UIDocument, LosePopup prefab, WinPopup prefab
-   - Terrain LayerMask
-4. Enter Play Mode
+3. Enter Play Mode
+
+All scene references and ScriptableObject assignments are pre-configured on the `GameFlowController` GameObject in MainScene.
 
 ## Running Tests
 
