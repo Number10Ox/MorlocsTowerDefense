@@ -12,6 +12,7 @@ public class GameUiCoordinator
     private BaseHealthHud baseHealthHud;
     private CoinHud coinHud;
     private TurretSelectionHud turretSelectionHud;
+    private RestartHintHud restartHintHud;
     private readonly GameObject losePopupPrefab;
     private readonly GameObject winPopupPrefab;
     private readonly Transform popupParent;
@@ -27,6 +28,7 @@ public class GameUiCoordinator
         BaseHealthHud baseHealthHud,
         CoinHud coinHud,
         TurretSelectionHud turretSelectionHud,
+        RestartHintHud restartHintHud,
         GameObject losePopupPrefab,
         GameObject winPopupPrefab,
         Transform popupParent)
@@ -38,6 +40,7 @@ public class GameUiCoordinator
         this.baseHealthHud = baseHealthHud;
         this.coinHud = coinHud;
         this.turretSelectionHud = turretSelectionHud;
+        this.restartHintHud = restartHintHud;
         this.losePopupPrefab = losePopupPrefab;
         this.winPopupPrefab = winPopupPrefab;
         this.popupParent = popupParent;
@@ -86,6 +89,13 @@ public class GameUiCoordinator
             }
             turretSelectionHud.SetVisible(isPlaying);
         }
+
+        if (restartHintHud != null)
+        {
+            bool isEndState = stateMachine.CurrentStateId == GameState.Win
+                || stateMachine.CurrentStateId == GameState.Lose;
+            restartHintHud.SetVisible(isEndState);
+        }
     }
 
     public void Teardown()
@@ -119,6 +129,7 @@ public class GameUiCoordinator
         }
         selectionStore = null;
         turretSelectionHud = null;
+        restartHintHud = null;
 
         if (losePopupInstance != null)
         {
@@ -178,6 +189,12 @@ public class GameUiCoordinator
         if (turretSelectionHud != null)
         {
             turretSelectionHud.SetVisible(isPlaying);
+        }
+
+        if (restartHintHud != null)
+        {
+            bool isEndState = to == GameState.Win || to == GameState.Lose;
+            restartHintHud.SetVisible(isEndState);
         }
     }
 

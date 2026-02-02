@@ -302,6 +302,39 @@ public class GameStateMachineTests
         Assert.AreEqual(new List<string> { "Exit", "Enter", "Event" }, callOrder);
     }
 
+    // --- Trigger during Enter ---
+
+    [Test]
+    public void TriggerFiredDuringEnter_SurvivesAndResolvesNextTick()
+    {
+        var stateA = new MockState();
+        var stateB = new MockState();
+        var stateC = new MockState();
+
+        // When stateB enters, it fires a trigger to advance to stateC
+        stateB.OnEnterCallback = () => sm.Fire(GameTrigger.BaseDestroyed);
+
+        sm.AddState(GameState.Init, stateA);
+        sm.AddState(GameState.Playing, stateB);
+        sm.AddState(GameState.Lose, stateC);
+
+        sm.AddTransition(GameState.Init, GameTrigger.SceneValidated, GameState.Playing);
+        sm.AddTransition(GameState.Playing, GameTrigger.BaseDestroyed, GameState.Lose);
+
+        sm.Start(GameState.Init);
+        sm.Fire(GameTrigger.SceneValidated);
+
+        // First tick: Init -> Playing (Enter fires BaseDestroyed, which must survive)
+        sm.Tick(0.016f);
+        Assert.AreEqual(GameState.Playing, sm.CurrentStateId);
+        Assert.AreEqual(1, stateB.EnterCount);
+
+        // Second tick: pending BaseDestroyed resolves -> Playing -> Lose
+        sm.Tick(0.016f);
+        Assert.AreEqual(GameState.Lose, sm.CurrentStateId);
+        Assert.AreEqual(1, stateC.EnterCount);
+    }
+
     // --- Integration ---
 
     [Test]
@@ -321,6 +354,54 @@ public class GameStateMachineTests
             stateMachine.Start(GameState.Init);
             Assert.AreEqual(GameState.Init, stateMachine.CurrentStateId);
 
+            stateMachine.Tick(0.016f);
+            Assert.AreEqual(GameState.Playing, stateMachine.CurrentStateId);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(homeBase.gameObject);
+        }
+    }
+
+    [Test]
+    public void FullRestartCycle_PlayingToWinToInitToPlaying()
+    {
+        var homeBase = new GameObject("Base").AddComponent<HomeBaseComponent>();
+        try
+        {
+            var stateMachine = new GameStateMachine();
+            var baseStore = new BaseStore(100);
+            var waveStore = new WaveStore();
+
+            var initState = new InitState(stateMachine.Fire, homeBase);
+            var playingState = new PlayingState(stateMachine.Fire, baseStore, waveStore);
+            var winState = new WinState(stateMachine.Fire);
+
+            stateMachine.AddState(GameState.Init, initState);
+            stateMachine.AddState(GameState.Playing, playingState);
+            stateMachine.AddState(GameState.Win, winState);
+
+            stateMachine.AddTransition(GameState.Init, GameTrigger.SceneValidated, GameState.Playing);
+            stateMachine.AddTransition(GameState.Playing, GameTrigger.AllWavesCleared, GameState.Win);
+            stateMachine.AddTransition(GameState.Win, GameTrigger.RestartRequested, GameState.Init);
+
+            // Init -> Playing
+            stateMachine.Start(GameState.Init);
+            stateMachine.Tick(0.016f);
+            Assert.AreEqual(GameState.Playing, stateMachine.CurrentStateId);
+
+            // Playing -> Win
+            waveStore.MarkAllWavesCleared();
+            stateMachine.Tick(0.016f);
+            stateMachine.Tick(0.016f);
+            Assert.AreEqual(GameState.Win, stateMachine.CurrentStateId);
+
+            // Win -> Init (RestartRequested)
+            stateMachine.Fire(GameTrigger.RestartRequested);
+            stateMachine.Tick(0.016f);
+            Assert.AreEqual(GameState.Init, stateMachine.CurrentStateId);
+
+            // Init -> Playing (SceneValidated fired during Enter, resolves next tick)
             stateMachine.Tick(0.016f);
             Assert.AreEqual(GameState.Playing, stateMachine.CurrentStateId);
         }

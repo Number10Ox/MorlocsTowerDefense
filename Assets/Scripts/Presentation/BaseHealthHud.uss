@@ -70,3 +70,21 @@
     font-size: 14px;
     color: white;
 }
+
+.restart-hint-container {
+    position: absolute;
+    bottom: 40%;
+    left: 0;
+    right: 0;
+    align-items: center;
+    display: none;
+}
+
+.restart-hint-label {
+    font-size: 24px;
+    color: white;
+    -unity-font-style: bold;
+    padding: 8px 16px;
+    background-color: rgba(0, 0, 0, 0.6);
+    border-radius: 4px;
+}

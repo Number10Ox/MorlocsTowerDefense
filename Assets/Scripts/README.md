@@ -20,6 +20,7 @@
 ```
 GameFlowController.Update()
   1. PresentationAdapter.CollectInput()   -- Unity input -> sim-readable structs
+  1b. Check RestartRequested              -- if Win/Lose and R pressed, fire RestartRequested trigger
   2. GameStateMachine.Tick()              -- resolve pending triggers, tick current state
   3. GameSession.BeginFrame()             -- flush deferred removals, clear frame lists
   4. SystemScheduler.Tick()               -- systems tick in deterministic phase order (gated by Playing state)
@@ -42,7 +43,8 @@ Every piece of simulation data has exactly one system that writes it. No excepti
 | `TurretSimData.FireCooldown` | `ProjectileSystem` | `ProjectileSystem` |
 | `ProjectileSimData.Position` | `ProjectileSystem` | `PresentationAdapter` |
 | `ProjectileStore.HitsThisFrame` | `ProjectileSystem` | `DamageSystem` |
-| `PlacementInput` | `PresentationAdapter` | `PlacementSystem` |
+| `PlacementInput.PlaceRequested` | `PresentationAdapter` | `PlacementSystem` |
+| `PlacementInput.RestartRequested` | `PresentationAdapter` | `GameFlowController` |
 | `WaveStore.SpawnQueue` | `WaveSystem` | `SpawnSystem` |
 | `WaveStore.AllWavesCleared` | `WaveSystem` | `PlayingState` |
 | `WaveStore.CurrentWaveIndex` | `WaveSystem` | `PresentationAdapter` |

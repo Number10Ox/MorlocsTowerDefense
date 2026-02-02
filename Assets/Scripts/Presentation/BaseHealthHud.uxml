@@ -13,4 +13,7 @@
         <ui:Label name="turret-selection-label" text="Turrets:" class="turret-selection-label" />
         <ui:VisualElement name="turret-options" />
     </ui:VisualElement>
+    <ui:VisualElement name="restart-hint-container" class="restart-hint-container">
+        <ui:Label name="restart-hint-label" text="Press R to Restart" class="restart-hint-label" />
+    </ui:VisualElement>
 </ui:UXML>

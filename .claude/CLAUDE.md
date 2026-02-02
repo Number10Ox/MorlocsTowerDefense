@@ -22,7 +22,7 @@ At the start of each session, check for and read the following files if they exi
 | Classes | PascalCase | `WaveManager`, `AudioSystem` |
 | Methods (public & private) | PascalCase | `PlayAnimation()`, `LoadAssets()` |
 | Private fields | camelCase | `private float blendTimer;` |
-| Serialized private fields | camelCase with attribute | `[SerializeField] private float fireRate;` |
+| Serialized private fields | camelCase with attribute | `[SerializeField] private float moveSpeed;` |
 | Properties | PascalCase | `public Transform ModelRoot => modelRoot;` |
 | Constants | UPPER_SNAKE_CASE | `private const string BGM_MIXER_GROUP_KEY = "BGM";` |
 | Enums | PascalCase type and values | `enum CreepType { Small, Big }` |
@@ -79,6 +79,7 @@ Avoid generic `Get`/`Set` prefixes. Exceptions: standard C# idioms (`TryGetValue
 - **Enforce prefab contracts with `[RequireComponent]`** — If a MonoBehaviour always needs a sibling component, declare `[RequireComponent(typeof(T))]` on the class. This makes the dependency editor-enforced rather than runtime-enforced.
 - **Cache in pooling infrastructure** — Object pools that call `TryGetComponent` on Acquire/Return should cache the component reference per instance (e.g., in a `Dictionary<GameObject, IPoolable>`) to avoid repeated lookups across the object's pooled lifetime.
 - **Constructor injection for pure C# objects** — Systems, adapters, and other non-MonoBehaviour classes receive their dependencies through constructors, not through runtime lookups.
+- **Constructor/method parameter limits** — 0–3 parameters: good. 4–5: acceptable, but verify the method isn't mixing concerns. 6+: design smell — group related parameters into small bundle types (e.g., nested `readonly record struct` grouping stores, HUDs, or prefab refs). Bundle by concept, not by count. Do not hide dependencies behind a god-config object or service locator. Tests should be able to pass `default` for irrelevant bundles instead of a long trail of `null`s.
 
 ### Code Clarity
 

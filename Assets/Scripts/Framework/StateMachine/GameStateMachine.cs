@@ -116,8 +116,9 @@ public class GameStateMachine
 
         if (pendingTrigger.HasValue)
         {
-            ResolveTrigger(pendingTrigger.Value);
+            var trigger = pendingTrigger.Value;
             pendingTrigger = null;
+            ResolveTrigger(trigger);
         }
 
         currentState.Tick(deltaTime);

@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 // Pure C# helper: validates TurretDefinitions entries and builds a TurretTypeDirectory.
-// Keeps GameFlowController.Awake() clean and makes catalog validation unit-testable.
+// Keeps GameFlowController.Awake() clean and makes definitions validation unit-testable.
 // Locally copies and validates each entry so runtime correctness never depends on OnValidate.
 public static class TurretTypeDirectoryBuilder
 {

@@ -85,6 +85,11 @@ public class PresentationAdapter
         var keyboard = Keyboard.current;
         if (keyboard != null)
         {
+            if (keyboard[Key.R].wasPressedThisFrame)
+            {
+                placementInput.RestartRequested = true;
+            }
+
             int maxKeys = Math.Min(turretTypeOrder.Length, DIGIT_KEYS.Length);
             for (int i = 0; i < maxKeys; i++)
             {

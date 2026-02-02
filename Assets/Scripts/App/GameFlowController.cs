@@ -27,6 +27,12 @@ public class GameFlowController : MonoBehaviour
     private PresentationAdapter presentationAdapter;
     private GameSession gameSession;
     private GameUiCoordinator uiCoordinator;
+    private PlacementInput placementInput;
+    private WaveSystem waveSystem;
+    private SpawnSystem spawnSystem;
+    private PlacementSystem placementSystem;
+    private ProjectileSystem projectileSystem;
+    private EconomySystem economySystem;
 
     private void Awake()
     {
@@ -95,9 +101,9 @@ public class GameFlowController : MonoBehaviour
         if (!TurretTypeDirectoryBuilder.TryBuild(
             turretDefinitions.Entries,
             out TurretTypeDirectory turretDirectory,
-            out string turretCatalogError))
+            out string turretBuildError))
         {
-            Debug.LogError($"GameFlowController: {turretCatalogError}");
+            Debug.LogError($"GameFlowController: {turretBuildError}");
             enabled = false;
             return;
         }
@@ -105,9 +111,9 @@ public class GameFlowController : MonoBehaviour
         if (!CreepTypeDirectoryBuilder.TryBuild(
             creepDefinitions.Entries,
             out CreepTypeDirectory creepDirectory,
-            out string creepCatalogError))
+            out string creepBuildError))
         {
-            Debug.LogError($"GameFlowController: {creepCatalogError}");
+            Debug.LogError($"GameFlowController: {creepBuildError}");
             enabled = false;
             return;
         }
@@ -125,12 +131,12 @@ public class GameFlowController : MonoBehaviour
         gameSession = new GameSession(baseConfig.MaxHealth, economyConfig.StartingCoins, defaultType);
 
         // Phase 1 — World Update
-        var waveSystem = new WaveSystem(
+        waveSystem = new WaveSystem(
             gameSession.WaveStore,
             gameSession.CreepStore,
             waveConfig.Waves);
 
-        var spawnSystem = new SpawnSystem(
+        spawnSystem = new SpawnSystem(
             gameSession.CreepStore,
             gameSession.WaveStore,
             spawnPositions,
@@ -139,8 +145,8 @@ public class GameFlowController : MonoBehaviour
 
         var movementSystem = new MovementSystem(gameSession.CreepStore);
 
-        var placementInput = new PlacementInput();
-        var placementSystem = new PlacementSystem(
+        placementInput = new PlacementInput();
+        placementSystem = new PlacementSystem(
             gameSession.TurretStore,
             placementInput,
             gameSession.EconomyStore,
@@ -148,7 +154,7 @@ public class GameFlowController : MonoBehaviour
             turretDirectory.StatsByType);
 
         // Phase 2 — Combat
-        var projectileSystem = new ProjectileSystem(
+        projectileSystem = new ProjectileSystem(
             gameSession.TurretStore,
             gameSession.CreepStore,
             gameSession.ProjectileStore);
@@ -159,7 +165,7 @@ public class GameFlowController : MonoBehaviour
             gameSession.ProjectileStore);
 
         // Phase 3 — Resolution
-        var economySystem = new EconomySystem(
+        economySystem = new EconomySystem(
             gameSession.EconomyStore,
             gameSession.TurretStore,
             turretDirectory.StatsByType);
@@ -225,16 +231,21 @@ public class GameFlowController : MonoBehaviour
         stateMachine.AddTransition(GameState.Init, GameTrigger.SceneValidated, GameState.Playing);
         stateMachine.AddTransition(GameState.Playing, GameTrigger.BaseDestroyed, GameState.Lose);
         stateMachine.AddTransition(GameState.Playing, GameTrigger.AllWavesCleared, GameState.Win);
-        // Restart transitions registered when RestartState is implemented (Story 10)
+        stateMachine.AddTransition(GameState.Win, GameTrigger.RestartRequested, GameState.Init);
+        stateMachine.AddTransition(GameState.Lose, GameTrigger.RestartRequested, GameState.Init);
+
+        stateMachine.OnStateChanged += OnStateChanged;
 
         BaseHealthHud baseHealthHud = null;
         CoinHud coinHud = null;
         TurretSelectionHud turretSelectionHud = null;
+        RestartHintHud restartHintHud = null;
         if (hudDocument != null)
         {
             baseHealthHud = new BaseHealthHud(hudDocument);
             coinHud = new CoinHud(hudDocument);
             turretSelectionHud = new TurretSelectionHud(hudDocument, turretDirectory.OrderedStats, defaultType);
+            restartHintHud = new RestartHintHud(hudDocument);
         }
 
         uiCoordinator = new GameUiCoordinator(
@@ -245,6 +256,7 @@ public class GameFlowController : MonoBehaviour
             baseHealthHud,
             coinHud,
             turretSelectionHud,
+            restartHintHud,
             losePopupPrefab,
             winPopupPrefab,
             transform);
@@ -259,6 +271,13 @@ public class GameFlowController : MonoBehaviour
     private void Update()
     {
         presentationAdapter.CollectInput();
+
+        if ((stateMachine.CurrentStateId == GameState.Win
+            || stateMachine.CurrentStateId == GameState.Lose)
+            && placementInput.RestartRequested)
+        {
+            stateMachine.Fire(GameTrigger.RestartRequested);
+        }
 
         // Trigger resolution happens inside Tick. If a transition into Playing
         // occurs this frame, systems won't tick until the next frame.
@@ -275,8 +294,30 @@ public class GameFlowController : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (stateMachine != null)
+        {
+            stateMachine.OnStateChanged -= OnStateChanged;
+        }
+
         uiCoordinator?.Teardown();
         uiCoordinator = null;
+    }
+
+    private void OnStateChanged(GameState from, GameState to)
+    {
+        if (to != GameState.Init) return;
+        if (from != GameState.Win && from != GameState.Lose) return;
+
+        presentationAdapter.ResetVisuals();
+        gameSession.Reset();
+
+        waveSystem.Reset();
+        spawnSystem.Reset();
+        placementSystem.Reset();
+        projectileSystem.Reset();
+        economySystem.Reset();
+
+        uiCoordinator.Refresh();
     }
 
     private static int MaxCreepsInAnyWave(WaveDefinition[] waves)

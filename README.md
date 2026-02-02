@@ -9,6 +9,7 @@ A tower defense game built in Unity. Creeps spawn from fixed points and move tow
 | Left Click | Place turret at terrain position |
 | 1 | Select Regular turret |
 | 2 | Select Freezing turret |
+| R | Restart game (from Win/Lose screen) |
 
 ## Turret Types
 

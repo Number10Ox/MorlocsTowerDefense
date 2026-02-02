@@ -46,17 +46,17 @@ GameFlowController.Update() → GameStateMachine.Tick() → GameSession.BeginFra
 
 | Class | Type | Responsibility |
 |-------|------|---------------|
-| `GameFlowController` | MonoBehaviour | Composition root. Creates GameSession, state machine, states, system scheduler, systems, and presentation adapter. Configures transition table. Drives game loop via `Update()`. Gates system ticking by current state. Calls `GameSession.BeginFrame()` before system tick. |
-| `GameUiCoordinator` | Plain C# | State-driven presentation decisions: popup lifecycle (LosePopup on Lose, WinPopup on Win), HUD visibility, health/coin/turret-selection event forwarding. Subscribes to `GameStateMachine.OnStateChanged`, `BaseStore.OnBaseHealthChanged`, `EconomyStore.OnCoinsChanged`, and `TurretSelectionStore.OnSelectionChanged`. No simulation writes. Constructed by `GameFlowController`, torn down in `OnDestroy`. |
-| `GameSession` | Plain C# | Per-run session. Owns all stores (CreepStore, BaseStore, TurretStore, ProjectileStore, EconomyStore, TurretSelectionStore, WaveStore). Constructor takes `defaultTurretType` for `TurretSelectionStore`. `BeginFrame()` flushes deferred store operations and clears per-frame change lists. `Reset()` resets all stores for game restart. Discarded and recreated on restart. |
-| `GameStateMachine` | Plain C# | Owns state registry and transition table. Resolves triggers to transitions. Fires `OnStateChanged` event. Processes pending triggers at tick start. |
+| `GameFlowController` | MonoBehaviour | Composition root. Creates GameSession, state machine, states, system scheduler, systems, and presentation adapter. Configures transition table (including restart transitions Win/Lose → Init). Drives game loop via `Update()`: collects input, checks for restart request in Win/Lose states, ticks state machine, gates system ticking by Playing state, syncs visuals. Subscribes to `OnStateChanged` for reset handler: on transition to Init from Win/Lose, resets visuals → stores → systems → UI. |
+| `GameUiCoordinator` | Plain C# | State-driven presentation decisions: popup lifecycle (LosePopup on Lose, WinPopup on Win), HUD visibility (health/coin/turret-selection/restart-hint), event forwarding. Subscribes to `GameStateMachine.OnStateChanged`, `BaseStore.OnBaseHealthChanged`, `EconomyStore.OnCoinsChanged`, and `TurretSelectionStore.OnSelectionChanged`. Shows `RestartHintHud` in Win/Lose states. `Refresh()` re-reads all store values and updates all HUDs (called after reset). No simulation writes. Constructed by `GameFlowController`, torn down in `OnDestroy`. |
+| `GameSession` | Plain C# | Per-run session. Owns all stores (CreepStore, BaseStore, TurretStore, ProjectileStore, EconomyStore, TurretSelectionStore, WaveStore). Constructor takes `defaultTurretType` for `TurretSelectionStore`. `BeginFrame()` flushes deferred store operations and clears per-frame change lists. `Reset()` resets all stores for game restart. Reused across restarts (not discarded). |
+| `GameStateMachine` | Plain C# | Owns state registry and transition table. Resolves triggers to transitions. Fires `OnStateChanged` event. Processes pending triggers at tick start. Clears pending trigger before resolution so triggers fired during `Enter()` survive to the next tick. |
 | `GameState` | Enum | State identifiers: `Init`, `Playing`, `Win`, `Lose`. |
 | `GameTrigger` | Enum | Semantic transition triggers: `SceneValidated`, `BaseDestroyed`, `AllWavesCleared`, `RestartRequested`. |
 | `IGameState` | Interface | Contract for game states: `Enter()`, `Tick(float)`, `Exit()`. |
 | `InitState` | Plain C# : `IGameState` | Validates scene setup (Base, SpawnPoints). Fires `SceneValidated`. Future: async Addressable loading. |
 | `PlayingState` | Plain C# : `IGameState` | Manages gameplay flow. Polls end conditions each tick with one-shot guards (reset on `Enter()`). Priority: `BaseStore.IsDestroyed` (lose) checked first → fires `BaseDestroyed`; then `WaveStore.AllWavesCleared` (win) → fires `AllWavesCleared`. Once either trigger fires, all subsequent ticks are no-ops. Does not own or tick systems. |
-| `WinState` | Plain C# : `IGameState` | Represents win game state. Empty Enter/Tick/Exit — popup toggle handled by `GameUiCoordinator` as presentation. Future: `RestartRequested` trigger (Story 10). |
-| `LoseState` | Plain C# : `IGameState` | Represents lose game state. Empty Enter/Tick/Exit — popup toggle handled by `GameUiCoordinator` as presentation. Future: `RestartRequested` trigger (Story 10). |
+| `WinState` | Plain C# : `IGameState` | Represents win game state. Empty Enter/Tick/Exit — popup toggle handled by `GameUiCoordinator` as presentation. `RestartRequested` trigger fired by `GameFlowController` when R key pressed in this state. |
+| `LoseState` | Plain C# : `IGameState` | Represents lose game state. Empty Enter/Tick/Exit — popup toggle handled by `GameUiCoordinator` as presentation. `RestartRequested` trigger fired by `GameFlowController` when R key pressed in this state. |
 | `SystemScheduler` | Plain C# | Owns the ordered `IGameSystem[]` array. Ticks systems sequentially. Owned by `GameFlowController`, ticked when state machine is in gameplay states. |
 | `IGameSystem` | Interface | Contract for gameplay systems: `Tick(float)`. |
 | `CreepStore` | Plain C# | Authoritative owner of the creep collection. `Add()`, `MarkForRemoval()`, `BeginFrame()` (flush removals, clear frame lists). Exposes `ActiveCreeps`, `SpawnedThisFrame`, `RemovedIdsThisFrame`. |
@@ -78,14 +78,15 @@ GameFlowController.Update() → GameStateMachine.Tick() → GameSession.BeginFra
 | `TurretSelectionStore` | Plain C# | Authoritative owner of the currently selected turret type. Constructor takes `TurretType defaultType`. `SelectType(TurretType)` fires `OnSelectionChanged` event only on change. `Reset()` restores to the default type passed at construction. Writer: `PresentationAdapter` (CollectInput, keyboard). Readers: `PlacementSystem`, `GameUiCoordinator`. |
 | `TurretTypeStats` | Readonly struct | Per-turret-type combat and economy stats. Built once at bootstrap by `TurretTypeDirectoryBuilder.TryBuild()` from `TurretDefinitions` entries. Single source of truth: passed as `IReadOnlyDictionary<TurretType, TurretTypeStats>` to `PlacementSystem` and `EconomySystem`, as `TurretTypeStats[]` to `TurretSelectionHud`. Fields: Type, Range, FireInterval, Damage, ProjectileSpeed, Cost, SlowDuration, SlowMultiplier. |
 | `TurretDefinitions` | ScriptableObject | Inspector-editable table of turret definitions (`[CreateAssetMenu(fileName = "TurretDefinitions", menuName = "Game/Turret Definitions")]`). Contains `TurretTypeDefinition[]` entries where order determines default type (`[0]`), keyboard shortcuts (1-9), and HUD layout. `OnValidate()` sanitizes entries respecting struct copy semantics and detects duplicate `TurretType` entries. |
-| `TurretTypeDirectoryBuilder` | Static helper | Pure C# builder. `TryBuild(TurretTypeDefinition[], out TurretTypeDirectory, out string)` locally copies and validates each entry, builds the immutable `TurretTypeDirectory` result object. Fail-fast on null prefabs or duplicate types with index+type in error messages. Keeps `GameFlowController.Awake()` clean and makes catalog validation unit-testable. |
+| `TurretTypeDirectoryBuilder` | Static helper | Pure C# builder. `TryBuild(TurretTypeDefinition[], out TurretTypeDirectory, out string)` locally copies and validates each entry, builds the immutable `TurretTypeDirectory` result object. Fail-fast on null prefabs or duplicate types with index+type in error messages. Keeps `GameFlowController.Awake()` clean and makes definitions validation unit-testable. |
 | `TurretTypeDirectory` | Plain C# (immutable) | Immutable result object built by `TurretTypeDirectoryBuilder.TryBuild()`. Properties: `OrderedTypes`, `OrderedStats`, `StatsByType`, `PrefabsByType`, `DefaultType`. Passed to systems and presentation at bootstrap. |
 | `CoinHud` | Plain C# | Stateless view for coin display. Queries `coin-label` and `coin-container` from shared `UIDocument`. `UpdateCoins(int)` sets label text. `SetVisible(bool)` toggles display. |
 | `TurretSelectionHud` | Plain C# | Data-driven view for turret selection display. Dynamically generates option elements from `TurretTypeStats[]` into an inner `turret-options` container in the shared `UIDocument`. Keyboard shortcuts [1]-[9] shown based on array order. `UpdateSelection(TurretType)` toggles `turret-option--selected` class. `SetVisible(bool)` toggles container display. Constructor takes `TurretType initialSelection`. |
 | `HomeBaseComponent` | MonoBehaviour | Thin component on Base GameObject. Identifies the base for system discovery. |
 | `SpawnPointComponent` | MonoBehaviour | Thin component on SpawnPoint GameObjects. Identifies spawn positions for bootstrap discovery. |
 | `CreepComponent` | MonoBehaviour + `IPoolable` | Thin component on creep prefab instances. Holds `CreepId` for sim-to-GO mapping. Pool lifecycle: activate on get, deactivate on return. |
-| `PresentationAdapter` | Plain C# | Reads store change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`) to manage creep and turret GameObjects via per-type object pools. Updates `Transform.position` from sim data. Manages turret pools via `IReadOnlyDictionary<TurretType, GameObjectPool>` and creep pools via `IReadOnlyDictionary<CreepType, GameObjectPool>`. Uses `CreepVisual` struct dictionary to track each creep's source pool (mirrors `TurretVisual`). Data-driven keyboard input: maps digit keys 1-9 to `TurretType[]` turret type order from catalog. |
+| `RestartHintHud` | Plain C# | UI Toolkit view for restart hint. Queries `restart-hint-container` and `restart-hint-label` from shared `UIDocument`. `SetVisible(bool)` toggles display. Visible only in Win/Lose states. Mirrors CoinHud/BaseHealthHud pattern. |
+| `PresentationAdapter` | Plain C# | Reads store change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`) to manage creep and turret GameObjects via per-type object pools. Updates `Transform.position` from sim data. Manages turret pools via `IReadOnlyDictionary<TurretType, GameObjectPool>` and creep pools via `IReadOnlyDictionary<CreepType, GameObjectPool>`. Uses `CreepVisual` struct dictionary to track each creep's source pool (mirrors `TurretVisual`). `CollectInput()`: reads keyboard for restart (R key → `PlacementInput.RestartRequested`), turret type selection (digit keys 1-9), and mouse clicks for placement. `ResetVisuals()` returns all pooled GameObjects to their source pools. |
 
 #### Game State Machine
 
@@ -107,7 +108,7 @@ States receive an `Action<GameTrigger>` delegate at construction. Calling `fire(
 
 States: `Init` → `Playing` → `Win` / `Lose` → `Init` (restart)
 
-Reset: Transitioning back to `Init` triggers `PlayingState.Exit()` (tear down spawned objects, reset systems), then `InitState.Enter()` (re-validate scene, set up fresh game).
+Reset: `GameFlowController` fires `RestartRequested` when R key pressed in Win/Lose state. The state machine transitions to Init. `GameFlowController.OnStateChanged` handler runs the reset sequence: (1) `PresentationAdapter.ResetVisuals()` returns all pooled GameObjects, (2) `GameSession.Reset()` resets all stores, (3) per-system `Reset()` clears ID counters and internal state, (4) `GameUiCoordinator.Refresh()` forces HUD values from clean stores. On the next tick, `InitState.Enter()` fires `SceneValidated`, which resolves to Playing on the following tick. Two-frame transition: restart → Init (reset runs) → Playing (systems tick on clean state).
 
 #### Component & System Pattern
 
@@ -134,7 +135,12 @@ var systemScheduler = new SystemScheduler(new IGameSystem[]
 
 ```
 presentationAdapter.CollectInput();
-stateMachine.Tick(Time.deltaTime);
+
+// Restart check: only in Win/Lose states, before state machine tick
+if ((currentState == Win || currentState == Lose) && placementInput.RestartRequested)
+    stateMachine.Fire(RestartRequested);
+
+stateMachine.Tick(Time.deltaTime);      // Resolves pending triggers, ticks current state
 
 if (stateMachine.CurrentStateId == GameState.Playing)
 {
@@ -201,6 +207,7 @@ Stores themselves provide lifecycle operations (`Add`, `MarkForRemoval`, `BeginF
 | Coin balance | EconomyStore (field: CurrentCoins) | EconomySystem | PlacementSystem (affordability via CanAfford), CoinHud (via OnCoinsChanged) |
 | Wave progress (current index, active, all-cleared) | WaveStore | WaveSystem | PlayingState (end condition), PresentationAdapter |
 | Player input (placement) | PlacementInput | PresentationAdapter (CollectInput) | PlacementSystem |
+| Player input (restart) | PlacementInput (field: RestartRequested) | PresentationAdapter (CollectInput, R key) | GameFlowController |
 | Selected turret type | TurretSelectionStore (field: SelectedType) | PresentationAdapter (CollectInput, keyboard) | PlacementSystem, GameUiCoordinator |
 | Creep slow remaining time | CreepStore (field: SlowRemainingTime) | DamageSystem | MovementSystem |
 | Creep slow multiplier | CreepStore (field: SlowMultiplier) | DamageSystem | MovementSystem |
@@ -246,7 +253,7 @@ Assets/Scripts/
 ├── Systems/                # WaveSystem, SpawnSystem, MovementSystem, PlacementSystem, ProjectileSystem, DamageSystem, EconomySystem
 ├── Components/             # SpawnPointComponent, HomeBaseComponent, CreepComponent, TurretComponent, ProjectileComponent
 ├── Input/                  # PlacementInput
-├── Presentation/           # PresentationAdapter, GameUiCoordinator, BaseHealthHud, CoinHud, TurretSelectionHud (.cs + UI Toolkit assets)
+├── Presentation/           # PresentationAdapter, GameUiCoordinator, BaseHealthHud, CoinHud, TurretSelectionHud, RestartHintHud (.cs + UI Toolkit assets)
 └── Data/                   # ScriptableObject definitions (CreepTypeDefinition, CreepDefinitions, SpawnConfig, BaseConfig, TurretTypeDefinition, TurretDefinitions, EconomyConfig, WaveEntryDefinition, WaveDefinition, WaveConfig)
 ```
 

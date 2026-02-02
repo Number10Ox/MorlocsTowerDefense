@@ -112,7 +112,8 @@ classDiagram
 - `IGameSystem` provides a uniform `Tick()` contract for gameplay systems. Systems are global — they exist independently of game states.
 - `PresentationAdapter` is a **plain C# class** owned by `GameFlowController`. It is the only place that calls Unity input and rendering APIs. Systems never reference it directly — they read input structs it produces and write sim data it consumes. Stub in Story 1; gains responsibilities as systems are added.
 - All four states (`Init`, `Playing`, `Win`, `Lose`) and their `IGameState` implementations exist. `WinState` and `LoseState` are empty shells — presentation (popups, HUD toggling) is handled by `GameUiCoordinator`.
-- `GameTrigger` values are added incrementally as stories introduce new transitions.
+- `GameTrigger` values are added incrementally as stories introduce new transitions. `RestartRequested` was added in Story 10.
+- **Trigger-during-Enter fix (Story 10):** `Tick()` clears `pendingTrigger` before `ResolveTrigger()`, so triggers fired during `Enter()` survive to the next tick. This is critical for the restart cycle where `InitState.Enter()` fires `SceneValidated`.
 
 ---
 
@@ -143,7 +144,7 @@ stateDiagram-v2
 
 **Story 1 scope:** All four states are implemented. `Init` and `Playing` contain logic; `Win` and `Lose` are empty shells. Presentation concerns (popups, HUD toggling) are handled by `GameUiCoordinator.OnStateChanged`.
 
-**Reset path:** Restart from Win/Lose transitions back to `Init`. `PlayingState.Exit()` tears down spawned objects and system state. `InitState.Enter()` re-validates and sets up a fresh game. No residual state.
+**Reset path (Story 10):** R key press in Win/Lose → `GameFlowController` fires `RestartRequested` → state machine transitions to `Init`. `OnStateChanged` handler runs full reset: `ResetVisuals()` → `GameSession.Reset()` → system resets → `GameUiCoordinator.Refresh()`. `InitState.Enter()` fires `SceneValidated` (survives via trigger-during-Enter fix), resolving to `Playing` on the next tick. Two-frame transition: Frame N resets, Frame N+1 enters Playing with clean state.
 
 ---
 
@@ -371,6 +372,7 @@ Assets/
 │   │   ├── BaseHealthHud.cs
 │   │   ├── CoinHud.cs
 │   │   ├── TurretSelectionHud.cs
+│   │   ├── RestartHintHud.cs
 │   │   ├── BaseHealthHud.uss
 │   │   ├── BaseHealthHud.uxml
 │   │   └── DefaultPanel Settings.asset
@@ -419,7 +421,9 @@ Assets/
 │   │   ├── WaveStoreTests.cs
 │   │   ├── WaveSystemTests.cs
 │   │   ├── WinStateTests.cs
-│   │   └── WaveIntegrationTests.cs
+│   │   ├── WaveIntegrationTests.cs
+│   │   ├── GameResetTests.cs
+│   │   └── GameResetIntegrationTests.cs
 │   └── Runtime/
 │       └── RuntimeTests.asmdef
 ├── Prefabs/
@@ -1699,3 +1703,159 @@ sequenceDiagram
 - **Frame M+1**: `PlayingState.Tick()` detects `AllWavesCleared`, fires `AllWavesCleared` trigger (pending).
 - **Frame M+2**: State machine resolves trigger, transitions to `Win`. `GameUiCoordinator` shows WinPopup. Systems stop ticking.
 - This mirrors the `BaseDestroyed` detection timing: the condition is set by a system during Phase 1, `PlayingState` sees it one frame later.
+
+---
+
+## Story 10 — Game Reset
+
+### Class Diagram Additions
+
+```mermaid
+classDiagram
+    class PlacementInput {
+        +bool PlaceRequested
+        +bool RestartRequested
+        +Vector3 WorldPosition
+        +Clear()
+    }
+
+    class RestartHintHud {
+        -VisualElement container
+        +RestartHintHud(UIDocument)
+        +SetVisible(bool)
+    }
+
+    class GameUiCoordinator {
+        -RestartHintHud restartHintHud
+        +Refresh()
+        +OnStateChanged(GameState from, GameState to)
+    }
+
+    class GameFlowController {
+        -WaveSystem waveSystem
+        -SpawnSystem spawnSystem
+        -PlacementSystem placementSystem
+        -ProjectileSystem projectileSystem
+        -EconomySystem economySystem
+        -PlacementInput placementInput
+        +Awake()
+        +Update()
+        +OnDestroy()
+    }
+
+    class PresentationAdapter {
+        +CollectInput()
+        +SyncVisuals()
+        +ResetVisuals()
+    }
+
+    GameFlowController --> PlacementInput : checks RestartRequested
+    GameFlowController --> GameStateMachine : fires RestartRequested
+    GameFlowController --> GameSession : calls Reset()
+    GameFlowController --> PresentationAdapter : calls ResetVisuals()
+    GameFlowController --> GameUiCoordinator : calls Refresh()
+    GameUiCoordinator --> RestartHintHud : toggles visibility
+    PresentationAdapter --> PlacementInput : writes RestartRequested in CollectInput()
+```
+
+**Notes:**
+- `PlacementInput.RestartRequested` is written by `PresentationAdapter.CollectInput()` (R key detection) and read by `GameFlowController.Update()`. Cleared in `PlacementInput.Clear()`.
+- `RestartHintHud` follows the same pattern as `CoinHud`/`BaseHealthHud` — plain C# class querying elements from a shared `UIDocument`. Shows "Press R to Restart" text.
+- `GameUiCoordinator` shows `RestartHintHud` when entering Win or Lose, hides it otherwise. `Refresh()` forces all HUDs to re-read store values after a reset.
+- `GameFlowController` stores system references (previously local vars in `Awake()`) to call `Reset()` on each during restart. Also stores `PlacementInput` to read `RestartRequested`.
+- `PresentationAdapter.ResetVisuals()` returns all pooled GameObjects (creeps, turrets, projectiles) to their pools and clears tracking dictionaries.
+- `GameStateMachine.Tick()` was fixed to clear `pendingTrigger` BEFORE calling `ResolveTrigger()`, ensuring triggers fired during `Enter()` (e.g., `InitState` fires `SceneValidated`) survive to the next tick.
+
+### Restart Transition Table
+
+| From State | Trigger | To State |
+|------------|---------|----------|
+| Win | RestartRequested | Init |
+| Lose | RestartRequested | Init |
+
+### Game Reset Sequence — Win → Init → Playing
+
+```mermaid
+sequenceDiagram
+    participant Unity
+    participant Bootstrap as GameFlowController
+    participant Pres as PresentationAdapter
+    participant Input as PlacementInput
+    participant SM as GameStateMachine
+    participant Win as WinState
+    participant Init as InitState
+    participant Playing as PlayingState
+    participant Session as GameSession
+    participant Coord as GameUiCoordinator
+    participant Systems as Systems (Wave, Spawn, etc.)
+
+    Note over Unity: Frame N — Win state, player presses R
+
+    Unity->>Bootstrap: Update()
+    Bootstrap->>Pres: CollectInput()
+    Note over Pres: keyboard[Key.R].wasPressedThisFrame
+    Pres->>Input: RestartRequested = true
+
+    Note over Bootstrap: Check restart condition
+    Note over Bootstrap: CurrentStateId == Win && RestartRequested
+    Bootstrap->>SM: Fire(RestartRequested)
+
+    Bootstrap->>SM: Tick(dt)
+    Note over SM: Resolve (Win, RestartRequested) → Init
+    SM->>Win: Exit()
+    SM-->>SM: Switch to InitState
+    SM->>Init: Enter()
+    Note over Init: Validate scene, Fire(SceneValidated)
+    Note over SM: pendingTrigger = SceneValidated (survives — bug fix)
+
+    SM-->>Bootstrap: OnStateChanged(Win, Init)
+
+    Note over Bootstrap: Reset handler fires
+    Bootstrap->>Pres: ResetVisuals()
+    Note over Pres: Return all pooled GOs (creeps, turrets, projectiles)
+
+    Bootstrap->>Session: Reset()
+    Note over Session: All stores reset to initial values
+
+    Bootstrap->>Systems: Reset() on each system
+    Note over Systems: Wave, Spawn, Placement, Projectile, Economy
+
+    Bootstrap->>Coord: Refresh()
+    Note over Coord: Force HUD values from fresh stores
+
+    Note over Bootstrap: Systems do NOT tick (gated by Playing)
+
+    Note over Unity: Frame N+1 — SceneValidated resolves
+
+    Unity->>Bootstrap: Update()
+    Bootstrap->>Pres: CollectInput()
+    Bootstrap->>SM: Tick(dt)
+    Note over SM: Resolve (Init, SceneValidated) → Playing
+    SM->>Init: Exit()
+    SM-->>SM: Switch to PlayingState
+    SM->>Playing: Enter()
+    SM-->>Bootstrap: OnStateChanged(Init, Playing)
+    Note over Coord: Hide RestartHintHud, show gameplay HUDs
+
+    Note over Bootstrap: CurrentStateId == Playing
+    Bootstrap->>Session: BeginFrame()
+    Note over Session: Clean frame — all stores empty
+    Bootstrap->>Systems: Tick(dt) via SystemScheduler
+    Note over Systems: Fresh game starts from wave 0, ID 0
+
+    Bootstrap->>Pres: SyncVisuals()
+    Note over Pres: New creeps spawned, visuals synced
+```
+
+**Key timing:**
+- **Frame N** (Win/Lose): R key sets `RestartRequested`. `GameFlowController` fires `RestartRequested` trigger. State machine resolves Win → Init. `InitState.Enter()` fires `SceneValidated` (pending — survives due to trigger-during-Enter bug fix). `OnStateChanged` handler runs the full reset sequence: visuals → stores → systems → UI refresh. Systems do NOT tick (gated by `CurrentStateId == Playing`).
+- **Frame N+1**: `SceneValidated` resolves Init → Playing. `PlayingState.Enter()` runs. `GameFlowController` gates system ticking — now enabled. `BeginFrame()` on clean stores, systems tick from wave 0, creep/turret IDs restart from 0. Full fresh game.
+
+**Reset ordering (within OnStateChanged handler):**
+1. **ResetVisuals** first — returns pooled GameObjects before stores are cleared, so tracking dictionaries still have valid mappings.
+2. **Session.Reset** — clears all stores to initial values (health, coins, creep/turret/projectile lists, wave index).
+3. **System resets** — each system clears internal counters (next IDs, spawn timers, pending credits, wave phase).
+4. **UI Refresh** — forces all HUDs to re-read current store values, ensuring display matches reset state.
+
+**Trigger-during-Enter fix:**
+- `GameStateMachine.Tick()` clears `pendingTrigger` BEFORE calling `ResolveTrigger()`. This ensures that when `InitState.Enter()` fires `SceneValidated`, the trigger is stored as the new `pendingTrigger` and resolves on the next `Tick()`. Without this fix, the trigger was overwritten by the post-resolution `pendingTrigger = null`, causing the game to get stuck in Init on restart.
