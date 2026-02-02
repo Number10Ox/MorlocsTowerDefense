@@ -14,10 +14,19 @@ A tower defense game built in Unity. Creeps spawn from fixed points and move tow
 
 | Type | Effect | Cost |
 |------|--------|------|
-| Regular | Direct damage | Configured via RegularTurretDef SO |
-| Freezing | Damage + slow effect (reduces creep speed for a duration) | Configured via FreezingTurretDef SO |
+| Regular | Direct damage | Configured via TurretDefinitions SO |
+| Freezing | Damage + slow effect (reduces creep speed for a duration) | Configured via TurretDefinitions SO |
 
-Slow duration and multiplier are configured on the TurretDef ScriptableObject. The freezing effect reduces creep movement speed by the configured multiplier for the configured duration. Multiple hits refresh the slow timer.
+Slow duration and multiplier are configured on the TurretDefinitions ScriptableObject. The freezing effect reduces creep movement speed by the configured multiplier for the configured duration. Multiple hits refresh the slow timer.
+
+## Creep Types
+
+| Type | Characteristics |
+|------|----------------|
+| Small | Faster, lower HP |
+| Big | Slower, higher HP |
+
+Creep attributes (speed, HP, damage to base, coin reward) are configured via the CreepDefinitions ScriptableObject. Types spawn in round-robin order.
 
 ## Project Structure
 
@@ -31,7 +40,7 @@ Slow duration and multiplier are configured on the TurretDef ScriptableObject. T
   - `Components/` - Thin MonoBehaviour components for scene objects
   - `Input/` - Input bridge classes (PlacementInput)
   - `Presentation/` - Visual sync and UI (PresentationAdapter, HUDs, GameUiCoordinator)
-  - `Data/` - ScriptableObject definitions (CreepDef, TurretDef, SpawnConfig, etc.)
+  - `Data/` - ScriptableObject definitions (CreepDefinitions, TurretDefinitions, SpawnConfig, etc.)
 - `Assets/Tests/Editor/` - Edit Mode unit and integration tests
 - `Docs/` - TDD, architecture diagrams, project status
 
@@ -40,10 +49,10 @@ Slow duration and multiplier are configured on the TurretDef ScriptableObject. T
 1. Open the project in Unity
 2. Open `MainScene`
 3. On the `GameFlowController` GameObject, assign:
-   - Both TurretDef ScriptableObjects (RegularTurretDef, FreezingTurretDef)
-   - Both turret prefabs (Turret-regular, Turret-freezing)
-   - CreepDef, SpawnConfig, BaseConfig, EconomyConfig SOs
-   - Creep and projectile prefabs
+   - TurretDefinitions ScriptableObject
+   - CreepDefinitions ScriptableObject
+   - SpawnConfig, BaseConfig, EconomyConfig SOs
+   - Turret, creep, and projectile prefabs (assigned in definitions SOs)
    - HomeBase, SpawnPoints, UIDocument, LosePopup prefab
    - Terrain LayerMask
 4. Enter Play Mode

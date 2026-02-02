@@ -9,6 +9,11 @@ public class BaseHealthIntegrationTests
     private const float SPAWN_INTERVAL = 1f;
     private const float ARRIVAL_THRESHOLD = 0.5f;
 
+    private static readonly CreepTypeStats[] DefaultStats = new CreepTypeStats[]
+    {
+        new CreepTypeStats(CreepType.Small, CREEP_SPEED, DAMAGE_PER_CREEP, 3, 1)
+    };
+
     private CreepStore creepStore;
     private BaseStore baseStore;
     private SpawnSystem spawnSystem;
@@ -30,10 +35,7 @@ public class BaseHealthIntegrationTests
             basePosition,
             spawnInterval: SPAWN_INTERVAL,
             creepsPerSpawn: 1,
-            creepSpeed: CREEP_SPEED,
-            damageToBase: DAMAGE_PER_CREEP,
-            maxHealth: 3,
-            coinReward: 1);
+            DefaultStats);
 
         movementSystem = new MovementSystem(creepStore, arrivalThreshold: ARRIVAL_THRESHOLD);
         damageSystem = new DamageSystem(creepStore, baseStore, new ProjectileStore());

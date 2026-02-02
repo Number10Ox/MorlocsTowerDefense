@@ -18,8 +18,8 @@ public sealed class TurretTypeDirectory
         Dictionary<TurretType, TurretTypeStats> statsByType,
         Dictionary<TurretType, GameObject> prefabsByType)
     {
-        OrderedTypes = orderedTypes;
-        OrderedStats = orderedStats;
+        OrderedTypes = (TurretType[])orderedTypes.Clone();
+        OrderedStats = (TurretTypeStats[])orderedStats.Clone();
         StatsByType = statsByType;
         PrefabsByType = prefabsByType;
     }

@@ -59,7 +59,12 @@ GameFlowController.Update() → GameStateMachine.Tick() → GameSession.BeginFra
 | `SystemScheduler` | Plain C# | Owns the ordered `IGameSystem[]` array. Ticks systems sequentially. Owned by `GameFlowController`, ticked when state machine is in gameplay states. |
 | `IGameSystem` | Interface | Contract for gameplay systems: `Tick(float)`. |
 | `CreepStore` | Plain C# | Authoritative owner of the creep collection. `Add()`, `MarkForRemoval()`, `BeginFrame()` (flush removals, clear frame lists). Exposes `ActiveCreeps`, `SpawnedThisFrame`, `RemovedIdsThisFrame`. |
-| `SpawnSystem` | Plain C# : `IGameSystem` | Spawn timer. Creates `CreepSimData` entries via `CreepStore.Add()`. Depends on `CreepStore`, not on other systems. |
+| `CreepType` | Enum | Identifies creep variety: `Small`, `Big`. |
+| `CreepTypeStats` | Readonly struct | Per-creep-type stats. Built once at bootstrap by `CreepTypeDirectoryBuilder.TryBuild()` from `CreepDefinitions` entries. Fields: Type, Speed, DamageToBase, MaxHealth, CoinReward. |
+| `CreepDefinitions` | ScriptableObject | Inspector-editable table of creep definitions (`[CreateAssetMenu(fileName = "CreepDefinitions", menuName = "Game/Creep Definitions")]`). Contains `CreepTypeDefinition[]` entries where order determines round-robin spawn cycling. `OnValidate()` sanitizes entries via `Validate()` — no duplicate-type detection (builder is runtime authority). |
+| `CreepTypeDirectoryBuilder` | Static helper | Pure C# builder. `TryBuild(CreepTypeDefinition[], out CreepTypeDirectory, out string)` locally copies and validates each entry, builds the immutable `CreepTypeDirectory` result object. Fail-fast on null prefabs or duplicate types with index+type in error messages. Mirrors `TurretTypeDirectoryBuilder`. |
+| `CreepTypeDirectory` | Plain C# (immutable) | Immutable result object built by `CreepTypeDirectoryBuilder.TryBuild()`. Properties: `OrderedTypes`, `OrderedStats`, `StatsByType`, `PrefabsByType`. No `DefaultType` (unlike turret — creeps cycle through all types). |
+| `SpawnSystem` | Plain C# : `IGameSystem` | Spawn timer. Creates `CreepSimData` entries via `CreepStore.Add()`. Cycles through creep types round-robin per creep using `CreepTypeStats[]` from `CreepTypeDirectory`. Depends on `CreepStore`, not on other systems. |
 | `MovementSystem` | Plain C# : `IGameSystem` | Advances creep positions toward base. Detects arrival, sets `ReachedBase = true`, and calls `CreepStore.MarkForRemoval()`. Depends on `CreepStore`, not on other systems. |
 | `DamageSystem` | Plain C# : `IGameSystem` | Three-phase damage processing. `TickSlowEffects(dt)`: decrements `SlowRemainingTime` on all alive creeps, clamps to zero. `ProcessProjectileHits()`: reads `ProjectileStore.HitsThisFrame`, applies damage to creeps (clamped to 0), marks dead creeps for removal, fires `OnCreepKilled(creepId, coinReward)` event; if creep survives and hit carries `SlowDuration > 0`, applies slow effect (`SlowRemainingTime = hit.SlowDuration, SlowMultiplier = hit.SlowMultiplier`). `ProcessBaseDamage()`: iterates `ActiveCreeps`, applies `BaseStore.ApplyDamage()` for each with `ReachedBase && !HasDealtBaseDamage && Health > 0`, sets `HasDealtBaseDamage = true`. Dead-creep guard prevents killed creeps from dealing base damage. |
 | `ProjectileSystem` | Plain C# : `IGameSystem` | Turret firing (with inline target selection), projectile movement, and hit detection. `UpdateFireTimers()`: decrements cooldowns, finds nearest alive creep in range via sqrMagnitude scan, spawns homing projectile. `MoveProjectiles()`: advances projectiles toward target, records hits via `ProjectileStore.RecordHit()`, discards projectiles whose target is dead/removed. |
@@ -77,7 +82,7 @@ GameFlowController.Update() → GameStateMachine.Tick() → GameSession.BeginFra
 | `HomeBaseComponent` | MonoBehaviour | Thin component on Base GameObject. Identifies the base for system discovery. |
 | `SpawnPointComponent` | MonoBehaviour | Thin component on SpawnPoint GameObjects. Identifies spawn positions for bootstrap discovery. |
 | `CreepComponent` | MonoBehaviour + `IPoolable` | Thin component on creep prefab instances. Holds `CreepId` for sim-to-GO mapping. Pool lifecycle: activate on get, deactivate on return. |
-| `PresentationAdapter` | Plain C# | Reads store change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`) to manage creep GameObjects via object pool. Updates `Transform.position` from sim data. Manages turret pools via `IReadOnlyDictionary<TurretType, GameObjectPool>`. Data-driven keyboard input: maps digit keys 1-9 to `TurretType[]` turret type order from catalog. |
+| `PresentationAdapter` | Plain C# | Reads store change lists (`SpawnedThisFrame`, `RemovedIdsThisFrame`) to manage creep and turret GameObjects via per-type object pools. Updates `Transform.position` from sim data. Manages turret pools via `IReadOnlyDictionary<TurretType, GameObjectPool>` and creep pools via `IReadOnlyDictionary<CreepType, GameObjectPool>`. Uses `CreepVisual` struct dictionary to track each creep's source pool (mirrors `TurretVisual`). Data-driven keyboard input: maps digit keys 1-9 to `TurretType[]` turret type order from catalog. |
 
 #### Game State Machine
 
@@ -187,6 +192,7 @@ Stores themselves provide lifecycle operations (`Add`, `MarkForRemoval`, `BeginF
 | Projectile positions & state | ProjectileStore (fields: Position, TargetCreepId, Damage, Speed) | ProjectileSystem | PresentationAdapter |
 | Projectile slow params | ProjectileStore (fields: SlowDuration, SlowMultiplier) | ProjectileSystem (at creation) | DamageSystem (via ProjectileHit) |
 | Projectile hits per frame | ProjectileStore (HitsThisFrame) | ProjectileSystem (RecordHit) | DamageSystem |
+| Creep type | CreepStore (field: Type on CreepSimData) | SpawnSystem (at creation) | PresentationAdapter (pool selection) |
 | Creep coin reward | CreepStore (field: CoinReward) | SpawnSystem (at creation) | DamageSystem (passes through OnCreepKilled event) |
 | Base health | BaseStore (field: CurrentHealth) | DamageSystem | PlayingState (end condition), BaseHealthHud |
 | Coin balance | EconomyStore (field: CurrentCoins) | EconomySystem | PlacementSystem (affordability via CanAfford), CoinHud (via OnCoinsChanged) |
@@ -226,19 +232,19 @@ Creeps and projectiles use pre-allocated object pools managed by the `Presentati
 
 ```
 Assets/Scripts/
-├── App/                    # GameFlowController, GameSession, GameState, GameTrigger, TurretTypeDirectoryBuilder, TurretTypeDirectory
+├── App/                    # GameFlowController, GameSession, GameState, GameTrigger, TurretTypeDirectoryBuilder, TurretTypeDirectory, CreepTypeDirectoryBuilder, CreepTypeDirectory
 ├── Framework/              # Reusable infrastructure
 │   ├── StateMachine/       # GameStateMachine, IGameState
 │   ├── Scheduling/         # SystemScheduler, IGameSystem
 │   └── Pooling/            # GameObjectPool, IPoolable (namespace: ObjectPooling)
 ├── States/                 # InitState, PlayingState, LoseState
 ├── Stores/                 # CreepStore, BaseStore, TurretStore, ProjectileStore, EconomyStore, TurretSelectionStore
-├── SimData/                # CreepSimData, TurretSimData, ProjectileSimData, ProjectileHit, TurretType, TurretTypeStats
+├── SimData/                # CreepSimData, TurretSimData, ProjectileSimData, ProjectileHit, TurretType, TurretTypeStats, CreepType, CreepTypeStats
 ├── Systems/                # SpawnSystem, MovementSystem, PlacementSystem, ProjectileSystem, DamageSystem, EconomySystem
 ├── Components/             # SpawnPointComponent, HomeBaseComponent, CreepComponent, TurretComponent, ProjectileComponent
 ├── Input/                  # PlacementInput
 ├── Presentation/           # PresentationAdapter, GameUiCoordinator, BaseHealthHud, CoinHud, TurretSelectionHud (.cs + UI Toolkit assets)
-├── Data/                   # ScriptableObject definitions (CreepDef, SpawnConfig, BaseConfig, TurretTypeDefinition, TurretDefinitions, EconomyConfig)
+├── Data/                   # ScriptableObject definitions (CreepTypeDefinition, CreepDefinitions, SpawnConfig, BaseConfig, TurretTypeDefinition, TurretDefinitions, EconomyConfig)
 └── Waves/                  # (Story 9)
 ```
 
@@ -247,7 +253,7 @@ No project-wide namespace. Role-based folders group classes by architectural rol
 #### Extension Points
 
 - **New turret type** (same behavior, different stats): Add enum value to `TurretType`, add a row in the `TurretDefinitions` asset, create a prefab. Zero code changes in systems or presentation.
-- **New creep variant** (same behavior, different stats): Add ScriptableObject definition asset → Addressables picks it up → existing systems process it. Data-only change.
+- **New creep variant** (same behavior, different stats): Add enum value to `CreepType`, add a row in the `CreepDefinitions` asset, create a prefab. Zero code changes in systems or presentation.
 - **New turret/creep behavior** (e.g., a novel turret effect): Requires a new effect handler in the relevant system(s). Scope depends on how different the behavior is from existing types.
 - **New game state**: Implement `IGameState` → add to `GameState` enum → register with `GameStateMachine` → add transition rows in `GameFlowController`.
 - **New trigger**: Add to `GameTrigger` enum → add transition rows in `GameFlowController`. Existing states unchanged.
@@ -299,7 +305,8 @@ The spec emphasizes making gameplay values "easy to tweak and tune." All gamepla
 
 | SO Class | Fields | Purpose | Story |
 |----------|--------|---------|-------|
-| `CreepDef` | `float speed`, `int damageToBase`, `int maxHealth`, `int coinReward` | Per-creep-type stats. | 2-6 |
+| `CreepTypeDefinition` | `CreepType creepType`, `GameObject prefab`, `float speed`, `int damageToBase`, `int maxHealth`, `int coinReward` | `[Serializable]` struct — per-creep-type definition. Entries live in `CreepDefinitions.entries[]`. `Validate()` clamps fields to valid ranges. | 8 |
+| `CreepDefinitions` | `CreepTypeDefinition[] entries` | ScriptableObject containing the ordered creep definitions table. Order determines round-robin spawn cycling. `OnValidate()` clamps ranges only — builder is runtime validation authority. | 8 |
 | `SpawnConfig` | `float spawnInterval`, `int creepsPerSpawn` | Spawn timing. Temporary driver until WaveSystem (Story 9) takes over. | 2 |
 | `BaseConfig` | `int maxHealth` | Base health tuning. | 3 |
 | `TurretTypeDefinition` | `TurretType turretType`, `GameObject prefab`, `int damage`, `float range`, `float fireInterval`, `float projectileSpeed`, `int cost`, `float slowDuration`, `float slowMultiplier` | `[Serializable]` struct — per-turret-type definition. Entries live in `TurretDefinitions.entries[]`. `Validate()` clamps fields to valid ranges (mutates in place — caller must reassign for struct copy semantics). | 5-7 |

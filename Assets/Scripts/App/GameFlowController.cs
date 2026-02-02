@@ -12,10 +12,9 @@ public class GameFlowController : MonoBehaviour
 
     [SerializeField] private HomeBaseComponent homeBase;
     [SerializeField] private SpawnPointComponent[] spawnPoints;
-    [SerializeField] private GameObject creepPrefab;
     [SerializeField] private GameObject projectilePrefab;
     [SerializeField] private SpawnConfig spawnConfig;
-    [SerializeField] private CreepDef creepDef;
+    [SerializeField] private CreepDefinitions creepDefinitions;
     [SerializeField] private TurretDefinitions turretDefinitions;
     [SerializeField] private BaseConfig baseConfig;
     [SerializeField] private EconomyConfig economyConfig;
@@ -38,13 +37,6 @@ public class GameFlowController : MonoBehaviour
             return;
         }
 
-        if (creepPrefab == null)
-        {
-            Debug.LogError("GameFlowController: Creep prefab reference is not assigned.");
-            enabled = false;
-            return;
-        }
-
         if (projectilePrefab == null)
         {
             Debug.LogError("GameFlowController: Projectile prefab reference is not assigned.");
@@ -59,9 +51,9 @@ public class GameFlowController : MonoBehaviour
             return;
         }
 
-        if (creepDef == null)
+        if (creepDefinitions == null)
         {
-            Debug.LogError("GameFlowController: CreepDef reference is not assigned.");
+            Debug.LogError("GameFlowController: CreepDefinitions reference is not assigned.");
             enabled = false;
             return;
         }
@@ -103,9 +95,19 @@ public class GameFlowController : MonoBehaviour
         if (!TurretTypeDirectoryBuilder.TryBuild(
             turretDefinitions.Entries,
             out TurretTypeDirectory turretDirectory,
-            out string catalogError))
+            out string turretCatalogError))
         {
-            Debug.LogError($"GameFlowController: {catalogError}");
+            Debug.LogError($"GameFlowController: {turretCatalogError}");
+            enabled = false;
+            return;
+        }
+
+        if (!CreepTypeDirectoryBuilder.TryBuild(
+            creepDefinitions.Entries,
+            out CreepTypeDirectory creepDirectory,
+            out string creepCatalogError))
+        {
+            Debug.LogError($"GameFlowController: {creepCatalogError}");
             enabled = false;
             return;
         }
@@ -123,10 +125,7 @@ public class GameFlowController : MonoBehaviour
             basePosition,
             spawnConfig.SpawnInterval,
             spawnConfig.CreepsPerSpawn,
-            creepDef.Speed,
-            creepDef.DamageToBase,
-            creepDef.MaxHealth,
-            creepDef.CoinReward);
+            creepDirectory.OrderedStats);
 
         var movementSystem = new MovementSystem(gameSession.CreepStore);
 
@@ -157,9 +156,17 @@ public class GameFlowController : MonoBehaviour
 
         damageSystem.OnCreepKilled += economySystem.HandleCreepKilled;
 
-        int creepPoolSize = (spawnPositions.Length > 0 ? spawnPositions.Length : 1)
-                            * spawnConfig.CreepsPerSpawn * POOL_SIZE_MULTIPLIER;
-        var creepPool = new ObjectPooling.GameObjectPool(creepPrefab, creepPoolSize, transform);
+        int totalCreepPoolSize = (spawnPositions.Length > 0 ? spawnPositions.Length : 1)
+                                 * spawnConfig.CreepsPerSpawn * POOL_SIZE_MULTIPLIER;
+        int creepTypeCount = Mathf.Max(1, creepDirectory.OrderedTypes.Length);
+        int perTypeCreepPoolSize = Mathf.CeilToInt((float)totalCreepPoolSize / creepTypeCount);
+
+        var creepPoolByType = new Dictionary<CreepType, ObjectPooling.GameObjectPool>(creepDirectory.PrefabsByType.Count);
+        foreach (var kvp in creepDirectory.PrefabsByType)
+        {
+            creepPoolByType[kvp.Key] =
+                new ObjectPooling.GameObjectPool(kvp.Value, perTypeCreepPoolSize, transform);
+        }
 
         var turretPoolByType = new Dictionary<TurretType, ObjectPooling.GameObjectPool>(turretDirectory.PrefabsByType.Count);
         foreach (var kvp in turretDirectory.PrefabsByType)
@@ -172,7 +179,7 @@ public class GameFlowController : MonoBehaviour
 
         presentationAdapter = new PresentationAdapter(
             gameSession.CreepStore,
-            creepPool,
+            creepPoolByType,
             gameSession.TurretStore,
             turretPoolByType,
             gameSession.ProjectileStore,

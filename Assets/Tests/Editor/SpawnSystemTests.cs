@@ -12,6 +12,7 @@ public class SpawnSystemTests
     private const int DEFAULT_PER_SPAWN = 1;
     private const int DEFAULT_DAMAGE_TO_BASE = 1;
     private const int DEFAULT_MAX_HEALTH = 3;
+    private const int DEFAULT_COIN_REWARD = 1;
 
     [SetUp]
     public void SetUp()
@@ -21,27 +22,29 @@ public class SpawnSystemTests
         basePosition = Vector3.zero;
     }
 
-    private const int DEFAULT_COIN_REWARD = 1;
-
     private SpawnSystem MakeSystem(
         Vector3[] spawnPositions = null,
         float interval = DEFAULT_INTERVAL,
         int perSpawn = DEFAULT_PER_SPAWN,
-        float speed = DEFAULT_SPEED,
-        int damageToBase = DEFAULT_DAMAGE_TO_BASE,
-        int maxHealth = DEFAULT_MAX_HEALTH,
-        int coinReward = DEFAULT_COIN_REWARD)
+        CreepTypeStats[] orderedStats = null)
     {
+        orderedStats ??= new CreepTypeStats[]
+        {
+            new CreepTypeStats(
+                CreepType.Small,
+                DEFAULT_SPEED,
+                DEFAULT_DAMAGE_TO_BASE,
+                DEFAULT_MAX_HEALTH,
+                DEFAULT_COIN_REWARD)
+        };
+
         return new SpawnSystem(
             store,
             spawnPositions ?? twoSpawnPoints,
             basePosition,
             interval,
             perSpawn,
-            speed,
-            damageToBase,
-            maxHealth,
-            coinReward);
+            orderedStats);
     }
 
     [Test]
@@ -89,7 +92,11 @@ public class SpawnSystemTests
     [Test]
     public void Tick_IntervalElapsed_CreepsHaveCorrectSpeed()
     {
-        var system = MakeSystem(speed: 7f);
+        var stats = new CreepTypeStats[]
+        {
+            new CreepTypeStats(CreepType.Small, 7f, DEFAULT_DAMAGE_TO_BASE, DEFAULT_MAX_HEALTH, DEFAULT_COIN_REWARD)
+        };
+        var system = MakeSystem(orderedStats: stats);
 
         system.Tick(1.0f);
 
@@ -203,7 +210,11 @@ public class SpawnSystemTests
     [Test]
     public void Tick_IntervalElapsed_CreepsHaveCorrectDamageToBase()
     {
-        var system = MakeSystem(damageToBase: 5);
+        var stats = new CreepTypeStats[]
+        {
+            new CreepTypeStats(CreepType.Small, DEFAULT_SPEED, 5, DEFAULT_MAX_HEALTH, DEFAULT_COIN_REWARD)
+        };
+        var system = MakeSystem(orderedStats: stats);
 
         system.Tick(1.0f);
 
@@ -214,7 +225,11 @@ public class SpawnSystemTests
     [Test]
     public void Tick_IntervalElapsed_CreepsHaveCorrectHealth()
     {
-        var system = MakeSystem(maxHealth: 5);
+        var stats = new CreepTypeStats[]
+        {
+            new CreepTypeStats(CreepType.Small, DEFAULT_SPEED, DEFAULT_DAMAGE_TO_BASE, 5, DEFAULT_COIN_REWARD)
+        };
+        var system = MakeSystem(orderedStats: stats);
 
         system.Tick(1.0f);
 
@@ -227,11 +242,24 @@ public class SpawnSystemTests
     [Test]
     public void Tick_IntervalElapsed_CreepsHaveCorrectCoinReward()
     {
-        var system = MakeSystem(coinReward: 3);
+        var stats = new CreepTypeStats[]
+        {
+            new CreepTypeStats(CreepType.Small, DEFAULT_SPEED, DEFAULT_DAMAGE_TO_BASE, DEFAULT_MAX_HEALTH, 3)
+        };
+        var system = MakeSystem(orderedStats: stats);
 
         system.Tick(1.0f);
 
         Assert.AreEqual(3, store.ActiveCreeps[0].CoinReward);
         Assert.AreEqual(3, store.ActiveCreeps[1].CoinReward);
+    }
+
+    [Test]
+    public void Tick_EmptyOrderedStats_DoesNotSpawn()
+    {
+        var system = MakeSystem(orderedStats: new CreepTypeStats[0]);
+
+        Assert.DoesNotThrow(() => system.Tick(1.0f));
+        Assert.AreEqual(0, store.ActiveCreeps.Count);
     }
 }

@@ -18,6 +18,12 @@ public class PresentationAdapter
         Key.Digit6, Key.Digit7, Key.Digit8, Key.Digit9
     };
 
+    private struct CreepVisual
+    {
+        public CreepComponent Component;
+        public GameObjectPool SourcePool;
+    }
+
     private struct TurretVisual
     {
         public TurretComponent Component;
@@ -25,8 +31,8 @@ public class PresentationAdapter
     }
 
     private readonly CreepStore creepStore;
-    private readonly GameObjectPool creepPool;
-    private readonly Dictionary<int, CreepComponent> creepMap;
+    private readonly IReadOnlyDictionary<CreepType, GameObjectPool> creepPoolByType;
+    private readonly Dictionary<int, CreepVisual> creepVisuals;
 
     private readonly TurretStore turretStore;
     private readonly IReadOnlyDictionary<TurretType, GameObjectPool> turretPoolByType;
@@ -44,7 +50,7 @@ public class PresentationAdapter
 
     public PresentationAdapter(
         CreepStore creepStore,
-        GameObjectPool creepPool,
+        IReadOnlyDictionary<CreepType, GameObjectPool> creepPoolByType,
         TurretStore turretStore,
         IReadOnlyDictionary<TurretType, GameObjectPool> turretPoolByType,
         ProjectileStore projectileStore,
@@ -56,7 +62,7 @@ public class PresentationAdapter
         LayerMask terrainLayerMask)
     {
         this.creepStore = creepStore ?? throw new ArgumentNullException(nameof(creepStore));
-        this.creepPool = creepPool ?? throw new ArgumentNullException(nameof(creepPool));
+        this.creepPoolByType = creepPoolByType ?? throw new ArgumentNullException(nameof(creepPoolByType));
         this.turretStore = turretStore ?? throw new ArgumentNullException(nameof(turretStore));
         this.turretPoolByType = turretPoolByType ?? throw new ArgumentNullException(nameof(turretPoolByType));
         this.projectileStore = projectileStore ?? throw new ArgumentNullException(nameof(projectileStore));
@@ -67,7 +73,7 @@ public class PresentationAdapter
         this.camera = camera ? camera : throw new ArgumentNullException(nameof(camera));
         this.terrainLayerMask = terrainLayerMask;
 
-        creepMap = new Dictionary<int, CreepComponent>(INITIAL_CREEP_MAP_CAPACITY);
+        creepVisuals = new Dictionary<int, CreepVisual>(INITIAL_CREEP_MAP_CAPACITY);
         turretVisuals = new Dictionary<int, TurretVisual>(INITIAL_TURRET_MAP_CAPACITY);
         projectileMap = new Dictionary<int, ProjectileComponent>(INITIAL_PROJECTILE_MAP_CAPACITY);
     }
@@ -117,7 +123,7 @@ public class PresentationAdapter
 
     public void ResetVisuals()
     {
-        ReturnAllToPool(creepMap, creepPool);
+        ReturnCreepsToSourcePools();
         ReturnTurretsToSourcePools();
         ReturnAllToPool(projectileMap, projectilePool);
     }
@@ -128,10 +134,10 @@ public class PresentationAdapter
         for (int i = 0; i < removed.Count; i++)
         {
             int id = removed[i];
-            if (creepMap.TryGetValue(id, out CreepComponent comp))
+            if (creepVisuals.TryGetValue(id, out CreepVisual visual))
             {
-                creepPool.Return(comp.gameObject);
-                creepMap.Remove(id);
+                visual.SourcePool.Return(visual.Component.gameObject);
+                creepVisuals.Remove(id);
             }
         }
     }
@@ -142,21 +148,32 @@ public class PresentationAdapter
         for (int i = 0; i < spawned.Count; i++)
         {
             CreepSimData creep = spawned[i];
-            GameObject go = creepPool.Acquire(creep.Position);
+            if (!creepPoolByType.TryGetValue(creep.Type, out GameObjectPool pool))
+            {
+                Debug.LogWarning($"PresentationAdapter: No pool for CreepType {creep.Type}.");
+                continue;
+            }
+
+            GameObject go = pool.Acquire(creep.Position);
             if (go.TryGetComponent(out CreepComponent comp))
             {
-                if (creepMap.ContainsKey(creep.Id))
+                if (creepVisuals.TryGetValue(creep.Id, out CreepVisual oldVisual))
                 {
-                    Debug.LogWarning($"PresentationAdapter: Duplicate creep Id={creep.Id}. Overwriting visual binding.");
+                    Debug.LogWarning($"PresentationAdapter: Duplicate creep Id={creep.Id}. Returning previous GO.");
+                    oldVisual.SourcePool.Return(oldVisual.Component.gameObject);
                 }
 
                 comp.Initialize(creep.Id);
-                creepMap[creep.Id] = comp;
+                creepVisuals[creep.Id] = new CreepVisual
+                {
+                    Component = comp,
+                    SourcePool = pool
+                };
             }
             else
             {
                 Debug.LogError($"PresentationAdapter: Creep prefab is missing CreepComponent. Id={creep.Id}");
-                creepPool.Return(go);
+                pool.Return(go);
             }
         }
     }
@@ -167,9 +184,9 @@ public class PresentationAdapter
         for (int i = 0; i < active.Count; i++)
         {
             CreepSimData creep = active[i];
-            if (creepMap.TryGetValue(creep.Id, out CreepComponent comp))
+            if (creepVisuals.TryGetValue(creep.Id, out CreepVisual visual))
             {
-                comp.transform.position = creep.Position;
+                visual.Component.transform.position = creep.Position;
             }
         }
     }
@@ -259,6 +276,16 @@ public class PresentationAdapter
                 comp.transform.position = projectile.Position;
             }
         }
+    }
+
+    private void ReturnCreepsToSourcePools()
+    {
+        foreach (var kvp in creepVisuals)
+        {
+            kvp.Value.SourcePool.Return(kvp.Value.Component.gameObject);
+        }
+
+        creepVisuals.Clear();
     }
 
     private void ReturnTurretsToSourcePools()

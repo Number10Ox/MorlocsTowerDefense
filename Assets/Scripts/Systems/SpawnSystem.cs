@@ -2,6 +2,7 @@ using System;
 using UnityEngine;
 
 // Timer-driven creep spawner. Creates CreepSimData in CreepStore each burst interval.
+// Cycles through creep types round-robin per creep using orderedStats from CreepTypeDirectory.
 public class SpawnSystem : IGameSystem
 {
     private const int MAX_BURSTS_PER_TICK = 5;
@@ -11,13 +12,11 @@ public class SpawnSystem : IGameSystem
     private readonly Vector3 basePosition;
     private readonly float spawnInterval;
     private readonly int creepsPerSpawn;
-    private readonly float creepSpeed;
-    private readonly int damageToBase;
-    private readonly int maxHealth;
-    private readonly int coinReward;
+    private readonly CreepTypeStats[] orderedStats;
 
     private float spawnTimer;
     private int nextCreepId;
+    private int currentTypeIndex;
 
     public SpawnSystem(
         CreepStore creepStore,
@@ -25,20 +24,14 @@ public class SpawnSystem : IGameSystem
         Vector3 basePosition,
         float spawnInterval,
         int creepsPerSpawn,
-        float creepSpeed,
-        int damageToBase,
-        int maxHealth,
-        int coinReward)
+        CreepTypeStats[] orderedStats)
     {
         this.creepStore = creepStore ?? throw new ArgumentNullException(nameof(creepStore));
         this.spawnPositions = spawnPositions ?? throw new ArgumentNullException(nameof(spawnPositions));
         this.basePosition = basePosition;
         this.spawnInterval = spawnInterval;
         this.creepsPerSpawn = creepsPerSpawn;
-        this.creepSpeed = creepSpeed;
-        this.damageToBase = damageToBase;
-        this.maxHealth = maxHealth;
-        this.coinReward = coinReward;
+        this.orderedStats = orderedStats ?? throw new ArgumentNullException(nameof(orderedStats));
     }
 
     public void Tick(float deltaTime)
@@ -54,6 +47,11 @@ public class SpawnSystem : IGameSystem
         }
 
         if (creepsPerSpawn <= 0)
+        {
+            return;
+        }
+
+        if (orderedStats.Length == 0)
         {
             return;
         }
@@ -79,6 +77,7 @@ public class SpawnSystem : IGameSystem
     {
         spawnTimer = 0f;
         nextCreepId = 0;
+        currentTypeIndex = 0;
     }
 
     private void SpawnBurst()
@@ -87,17 +86,20 @@ public class SpawnSystem : IGameSystem
         {
             for (int c = 0; c < creepsPerSpawn; c++)
             {
+                CreepTypeStats stats = orderedStats[currentTypeIndex];
                 var creep = new CreepSimData(nextCreepId++)
                 {
+                    Type = stats.Type,
                     Position = spawnPositions[s],
                     Target = basePosition,
-                    Speed = creepSpeed,
-                    DamageToBase = damageToBase,
-                    Health = maxHealth,
-                    MaxHealth = maxHealth,
-                    CoinReward = coinReward
+                    Speed = stats.Speed,
+                    DamageToBase = stats.DamageToBase,
+                    Health = stats.MaxHealth,
+                    MaxHealth = stats.MaxHealth,
+                    CoinReward = stats.CoinReward
                 };
                 creepStore.Add(creep);
+                currentTypeIndex = (currentTypeIndex + 1) % orderedStats.Length;
             }
         }
     }

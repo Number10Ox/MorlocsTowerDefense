@@ -9,7 +9,7 @@
 | 2. Architecture - Detailed Design | In progress | Composition root, state machine, system scheduler, store pattern, economy documented |
 | 3. Constraints & Ground Rules | Complete | 9 constraints from spec + tool constraint |
 | 4. Tech Package Choices | Complete | Input System, UI Toolkit, UGUI (provided popups), Addressables (SO data), Cinemachine dropped |
-| 5. Data Configuration Strategy | In progress | CreepDef, SpawnConfig, BaseConfig, EconomyConfig SOs defined; TurretTypeDefinition refactored to [Serializable] struct inside TurretDefinitions SO; WaveDef planned for Story 9 |
+| 5. Data Configuration Strategy | In progress | CreepTypeDefinition/CreepDefinitions SO (replaces CreepDef), SpawnConfig, BaseConfig, EconomyConfig SOs defined; TurretTypeDefinition refactored to [Serializable] struct inside TurretDefinitions SO; WaveDef planned for Story 9 |
 | 6. Provided Assets Reference | Complete | All prefabs, scene, terrain, materials cataloged |
 | 7. Deliverables - User Stories | Complete | Stories 1-10 with acceptance criteria |
 
@@ -24,7 +24,7 @@
 | Story 5: Turret Shooting & Creep Damage | Complete | ProjectileSystem (inline targeting), DamageSystem extended with projectile hits + OnCreepKilled, homing projectiles, dead-creep guards, TurretTypeDefinition data, ProjectileStore |
 | Story 6: Economy System | Complete | EconomyStore, EconomySystem (Phase 3), EconomyConfig SO, CoinHud (UI Toolkit), PlacementSystem affordability gate, DamageSystem OnCreepKilled carries reward, CoinReward on CreepSimData/CreepDef, cost on TurretTypeDefinition |
 | Story 7: Turret Types (Regular & Freezing) | Complete | TurretType enum, TurretTypeStats struct (with Type field), TurretSelectionStore (defaultType constructor), TurretSelectionHud (dynamic generation from TurretTypeStats[]), slow effect system (DamageSystem writes, MovementSystem reads), per-type costs via IReadOnlyDictionary, data-driven keyboard selection (1-9), dictionary-based turret pools. Refactored to data-driven: TurretDefinitions SO + TurretTypeDirectoryBuilder/TurretTypeDirectory. Adding a new turret type requires zero code changes. PresentationAdapter refactored to use TurretVisual struct dictionary instead of separate turretMap/turretSourcePool. TurretDefinitions.OnValidate detects duplicate TurretType entries. |
-| Story 8: Creep Variety | Not started | |
+| Story 8: Creep Variety | Complete | CreepType enum, CreepTypeStats struct, CreepTypeDefinition struct, CreepDefinitions SO, CreepTypeDirectoryBuilder/CreepTypeDirectory (mirrors turret pattern), SpawnSystem round-robin per-creep cycling, PresentationAdapter per-type creep pools with CreepVisual struct, Type field on CreepSimData. Old CreepDef SO deleted. |
 | Story 9: Wave System | Not started | |
 | Story 10: Game Reset | Not started | |
 
@@ -66,7 +66,7 @@
 - **EconomyStore**: Authoritative store for coin balance. Single writer: `EconomySystem`. Constructor accepts `startingCoins >= 0`. `TrySpendCoins` for atomic check-and-deduct. `CanAfford` read-only check used by `PlacementSystem`. `BeginFrame/Reset` lifecycle matches other stores.
 - **EconomySystem (Phase 3)**: Subscribes to `DamageSystem.OnCreepKilled`, buffers rewards locally (handler discipline), applies during `Tick()`. Reads `TurretStore.PlacedThisFrame` to deduct turret costs. No CreepStore dependency.
 - **PlacementSystem affordability gate**: `PlacementSystem` now reads `EconomyStore.CanAfford()` before placing. Clears input on insufficient coins. Never writes to EconomyStore.
-- **CoinReward per creep**: `CreepSimData.CoinReward` set by `SpawnSystem` at creation from `CreepDef.CoinReward`. Follows `DamageToBase` precedent.
+- **CoinReward per creep**: `CreepSimData.CoinReward` set by `SpawnSystem` at creation from `CreepTypeStats.CoinReward`. Follows `DamageToBase` precedent.
 - **CoinHud**: Stateless UI Toolkit view. Shares UIDocument with `BaseHealthHud`. `GameUiCoordinator` forwards `EconomyStore.OnCoinsChanged` to `CoinHud.UpdateCoins`.
 - **EconomyConfig SO**: ScriptableObject for `startingCoins` tuning. Assigned to `GameFlowController` in Inspector.
 - **TurretTypeDefinition.Cost**: Per-turret-type cost field. Passed to `PlacementSystem` and `EconomySystem` as primitive.
@@ -83,6 +83,12 @@
 - **Per-type costs via dictionary**: `EconomySystem` reads `turret.Type` and looks up `statsByType[type].Cost`. `PlacementSystem` reads `selectionStore.SelectedType` to pick matching `TurretTypeStats` via dictionary lookup. No switch statements on TurretType.
 - **TurretSelectionHud (dynamic generation)**: Builds UI elements dynamically from `TurretTypeStats[]`. Accepts `TurretType initialSelection`. Rebuilds into inner `turret-options` UXML container. Labels include keyboard shortcut and cost. USS class toggle (`turret-option--selected`) for highlighting.
 - **Ordering contract**: Array order in `TurretDefinitions` determines default type (`OrderedTypes[0]` / `DefaultType`), keyboard shortcuts (1-9), and HUD layout. Documented in catalog tooltip. `TurretDefinitions.OnValidate()` also detects duplicate TurretType entries.
+
+- **Data-driven creep types (mirrors turret pattern)**: `CreepDefinitions` SO + `CreepTypeDirectoryBuilder` + `CreepTypeDirectory` parallels the turret type infrastructure from Story 7. `CreepTypeDefinition` is a `[Serializable]` struct with `Validate()`. `OnValidate()` kept dumb (clamps ranges only) — builder is runtime validation authority. Adding a new creep type requires: enum value + definitions entry + prefab — zero code changes.
+- **Per-creep round-robin cycling**: `SpawnSystem` advances `currentTypeIndex` after each individual creep spawn (not per burst). This produces visible Small/Big alternation even with a single spawn point. `Reset()` resets the index.
+- **Per-type creep pools with CreepVisual struct**: `PresentationAdapter` manages `IReadOnlyDictionary<CreepType, GameObjectPool> creepPoolByType`. Uses `CreepVisual` struct (mirrors `TurretVisual`) to track each creep's source pool for correct return-to-pool. Pool budget split across types (`CeilToInt(total / typeCount)`) — not multiplied.
+- **CreepDef deleted**: Replaced entirely by `CreepDefinitions` with `CreepTypeDefinition` entries. No migration needed — old asset removed.
+- **Temporary round-robin spawning for testability**: Story 8 has no wave system yet (Story 9), but round-robin cycling through `orderedStats` makes multiple creep types visually testable in Play Mode without waves.
 
 ## Open Questions
 

@@ -4,6 +4,7 @@ using UnityEngine;
 public sealed class CreepSimData
 {
     public int Id { get; }
+    public CreepType Type;
     public Vector3 Position;
     public Vector3 Target;
     public float Speed;

@@ -314,7 +314,9 @@ Assets/
 │   │   ├── GameState.cs
 │   │   ├── GameTrigger.cs
 │   │   ├── TurretTypeDirectory.cs
-│   │   └── TurretTypeDirectoryBuilder.cs
+│   │   ├── TurretTypeDirectoryBuilder.cs
+│   │   ├── CreepTypeDirectory.cs
+│   │   └── CreepTypeDirectoryBuilder.cs
 │   ├── Framework/                # Reusable infrastructure
 │   │   ├── StateMachine/
 │   │   │   ├── GameStateMachine.cs
@@ -342,7 +344,9 @@ Assets/
 │   │   ├── ProjectileSimData.cs
 │   │   ├── ProjectileHit.cs
 │   │   ├── TurretType.cs
-│   │   └── TurretTypeStats.cs
+│   │   ├── TurretTypeStats.cs
+│   │   ├── CreepType.cs
+│   │   └── CreepTypeStats.cs
 │   ├── Systems/                  # IGameSystem implementations
 │   │   ├── SpawnSystem.cs
 │   │   ├── MovementSystem.cs
@@ -368,7 +372,8 @@ Assets/
 │   │   ├── BaseHealthHud.uxml
 │   │   └── DefaultPanel Settings.asset
 │   ├── Data/                     # ScriptableObject definitions
-│   │   ├── CreepDef.cs
+│   │   ├── CreepTypeDefinition.cs
+│   │   ├── CreepDefinitions.cs
 │   │   ├── SpawnConfig.cs
 │   │   ├── BaseConfig.cs
 │   │   ├── TurretTypeDefinition.cs
@@ -403,7 +408,9 @@ Assets/
 │   │   ├── EconomyIntegrationTests.cs
 │   │   ├── TurretTypesTests.cs
 │   │   ├── TurretTypesIntegrationTests.cs
-│   │   └── TurretTypeDirectoryBuilderTests.cs
+│   │   ├── TurretTypeDirectoryBuilderTests.cs
+│   │   ├── CreepTypeDirectoryBuilderTests.cs
+│   │   └── CreepVarietyIntegrationTests.cs
 │   └── Runtime/
 │       └── RuntimeTests.asmdef
 ├── Prefabs/
@@ -1355,3 +1362,94 @@ sequenceDiagram
 - **Frame N+1**: MovementSystem reads `SlowRemainingTime > 0`, computes effective speed. DamageSystem decrements timer.
 - **Frame N+K**: Timer reaches zero (clamped). Next frame's MovementSystem sees zero and uses full speed.
 - Effective slow duration is `[duration, duration + dt]` due to Phase 1/Phase 2 ordering. Consistent with next-frame visibility model.
+
+---
+
+## Story 8 — Creep Variety
+
+### Class Diagram
+
+```mermaid
+classDiagram
+    class CreepType {
+        <<enumeration>>
+        Small
+        Big
+    }
+
+    class CreepTypeStats {
+        <<struct>>
+        +CreepType Type
+        +float Speed
+        +int DamageToBase
+        +int MaxHealth
+        +int CoinReward
+    }
+
+    class CreepDefinitions {
+        <<ScriptableObject>>
+        -CreepTypeDefinition[] entries
+        +CreepTypeDefinition[] Entries
+        +OnValidate()
+    }
+
+    class CreepTypeDirectoryBuilder {
+        <<static>>
+        +TryBuild(CreepTypeDefinition[], out CreepTypeDirectory, out string) bool
+    }
+
+    class CreepTypeDirectory {
+        <<sealed>>
+        +CreepType[] OrderedTypes
+        +CreepTypeStats[] OrderedStats
+        +IReadOnlyDictionary~CreepType, CreepTypeStats~ StatsByType
+        +IReadOnlyDictionary~CreepType, GameObject~ PrefabsByType
+    }
+
+    class SpawnSystem {
+        -CreepStore creepStore
+        -Vector3[] spawnPositions
+        -float spawnInterval
+        -int creepsPerSpawn
+        -CreepTypeStats[] orderedStats
+        -int currentTypeIndex
+        +Tick(float deltaTime)
+        +Reset()
+    }
+
+    class CreepSimData {
+        +int Id
+        +CreepType Type
+        +Vector3 Position
+        +Vector3 Target
+        +float Speed
+        +int Health
+        +int MaxHealth
+        +int DamageToBase
+        +int CoinReward
+    }
+
+    class PresentationAdapter {
+        -IReadOnlyDictionary~CreepType, GameObjectPool~ creepPoolByType
+        -Dictionary~int, CreepVisual~ creepVisuals
+        +CollectInput()
+        +SyncVisuals()
+    }
+
+    GameFlowController --> CreepTypeDirectoryBuilder : TryBuild(definitions.Entries)
+    CreepTypeDirectoryBuilder --> CreepTypeDirectory : builds via out parameter
+    CreepTypeDirectory --> CreepTypeStats : contains statsByType, orderedStats
+    SpawnSystem --> CreepTypeStats : cycles round-robin per creep
+    SpawnSystem --> CreepSimData : sets Type at creation
+    PresentationAdapter --> CreepSimData : reads Type for pool selection
+    PresentationAdapter --> CreepTypeDirectory : uses PrefabsByType for pool creation
+```
+
+**Notes:**
+- Mirrors the turret type data-driven pattern from Story 7. `CreepDefinitions` SO + `CreepTypeDirectoryBuilder` + `CreepTypeDirectory` parallel the turret equivalents.
+- `SpawnSystem` constructor changed from individual stats (`float creepSpeed`, `int damageToBase`, etc.) to `CreepTypeStats[] orderedStats`. Cycles `currentTypeIndex` per creep (not per burst), wrapping round-robin.
+- `CreepSimData.Type` is write-once by `SpawnSystem` at creation. `PresentationAdapter` reads it for per-type pool selection.
+- `PresentationAdapter` manages creep pools via `IReadOnlyDictionary<CreepType, GameObjectPool> creepPoolByType` (mirrors turret pool pattern). Uses `CreepVisual` struct dictionary (mirrors `TurretVisual`) to track each creep's source pool for correct return-to-pool on removal.
+- `CreepTypeDirectory` has no `DefaultType` (unlike `TurretTypeDirectory`). All types participate equally in round-robin cycling.
+- Pool budget is split across types (`CeilToInt(total / typeCount)`) — not multiplied.
+- Adding a new creep type requires: enum value + definitions entry + prefab — zero system/presentation code changes.
