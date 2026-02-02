@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -6,16 +7,17 @@ public class BaseHealthIntegrationTests
     private const int BASE_MAX_HEALTH = 50;
     private const int DAMAGE_PER_CREEP = 10;
     private const float CREEP_SPEED = 10f;
-    private const float SPAWN_INTERVAL = 1f;
     private const float ARRIVAL_THRESHOLD = 0.5f;
 
-    private static readonly CreepTypeStats[] DefaultStats = new CreepTypeStats[]
-    {
-        new CreepTypeStats(CreepType.Small, CREEP_SPEED, DAMAGE_PER_CREEP, 3, 1)
-    };
+    private static readonly IReadOnlyDictionary<CreepType, CreepTypeStats> DefaultStatsByType =
+        new Dictionary<CreepType, CreepTypeStats>
+        {
+            { CreepType.Small, new CreepTypeStats(CreepType.Small, CREEP_SPEED, DAMAGE_PER_CREEP, 3, 1) }
+        };
 
     private CreepStore creepStore;
     private BaseStore baseStore;
+    private WaveStore waveStore;
     private SpawnSystem spawnSystem;
     private MovementSystem movementSystem;
     private DamageSystem damageSystem;
@@ -25,20 +27,29 @@ public class BaseHealthIntegrationTests
     {
         creepStore = new CreepStore();
         baseStore = new BaseStore(BASE_MAX_HEALTH);
+        waveStore = new WaveStore();
 
         var spawnPositions = new[] { new Vector3(5f, 0f, 0f) };
         var basePosition = Vector3.zero;
 
         spawnSystem = new SpawnSystem(
             creepStore,
+            waveStore,
             spawnPositions,
             basePosition,
-            spawnInterval: SPAWN_INTERVAL,
-            creepsPerSpawn: 1,
-            DefaultStats);
+            DefaultStatsByType);
 
         movementSystem = new MovementSystem(creepStore, arrivalThreshold: ARRIVAL_THRESHOLD);
         damageSystem = new DamageSystem(creepStore, baseStore, new ProjectileStore());
+    }
+
+    private void EnqueueAndSpawn(int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            waveStore.EnqueueSpawn(CreepType.Small);
+        }
+        spawnSystem.Tick(0f);
     }
 
     [Test]
@@ -47,7 +58,7 @@ public class BaseHealthIntegrationTests
         // Spawn a creep
         creepStore.BeginFrame();
         baseStore.BeginFrame();
-        spawnSystem.Tick(SPAWN_INTERVAL);
+        EnqueueAndSpawn(1);
 
         Assert.AreEqual(1, creepStore.ActiveCreeps.Count);
 
@@ -74,7 +85,7 @@ public class BaseHealthIntegrationTests
         // Spawn and move to arrival
         creepStore.BeginFrame();
         baseStore.BeginFrame();
-        spawnSystem.Tick(SPAWN_INTERVAL);
+        EnqueueAndSpawn(1);
 
         for (int i = 0; i < 100; i++)
         {
@@ -98,7 +109,7 @@ public class BaseHealthIntegrationTests
         // Spawn a creep far enough that it won't arrive immediately
         creepStore.BeginFrame();
         baseStore.BeginFrame();
-        spawnSystem.Tick(SPAWN_INTERVAL);
+        EnqueueAndSpawn(1);
 
         // Tick damage BEFORE movement — should not deal damage
         damageSystem.Tick(0.016f);
@@ -123,7 +134,8 @@ public class BaseHealthIntegrationTests
         GameTrigger? firedTrigger = null;
         var playingState = new PlayingState(
             trigger => firedTrigger = trigger,
-            baseStore);
+            baseStore,
+            waveStore);
         playingState.Enter();
 
         // Need 5 creeps at 10 damage each to destroy base with 50 HP
@@ -133,7 +145,7 @@ public class BaseHealthIntegrationTests
         {
             creepStore.BeginFrame();
             baseStore.BeginFrame();
-            spawnSystem.Tick(SPAWN_INTERVAL);
+            EnqueueAndSpawn(1);
 
             // Move creep to base
             for (int f = 0; f < 100; f++)
@@ -173,14 +185,13 @@ public class BaseHealthIntegrationTests
         {
             creepStore.BeginFrame();
             baseStore.BeginFrame();
-            spawnSystem.Tick(0.5f);
+            waveStore.EnqueueSpawn(CreepType.Small);
+            spawnSystem.Tick(0f);
             movementSystem.Tick(0.5f);
             damageSystem.Tick(0.5f);
         }
 
-        // After 30 frames at 0.5s each = 15s of game time,
-        // with 1s spawn interval and 5-unit distance at speed 10,
-        // multiple creeps should have arrived and dealt damage
+        // After 30 frames, multiple creeps should have arrived and dealt damage
         Assert.Less(baseStore.CurrentHealth, BASE_MAX_HEALTH, "Base should have taken some damage");
         Assert.Greater(healthChangeCount, 0, "OnBaseHealthChanged should have fired");
     }

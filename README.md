@@ -26,21 +26,21 @@ Slow duration and multiplier are configured on the TurretDefinitions ScriptableO
 | Small | Faster, lower HP |
 | Big | Slower, higher HP |
 
-Creep attributes (speed, HP, damage to base, coin reward) are configured via the CreepDefinitions ScriptableObject. Types spawn in round-robin order.
+Creep attributes (speed, HP, damage to base, coin reward) are configured via the CreepDefinitions ScriptableObject. Types and counts are defined per wave in the WaveConfig ScriptableObject. Spawn positions are assigned round-robin across SpawnPoints.
 
 ## Project Structure
 
 - `Assets/Scripts/` - All game code (role-based folder organization)
   - `App/` - Composition root (`GameFlowController`), `GameSession`
   - `Framework/` - State machine, system scheduler, interfaces
-  - `States/` - Game state implementations (Init, Playing, Lose)
+  - `States/` - Game state implementations (Init, Playing, Win, Lose)
   - `Stores/` - Authoritative data stores (CreepStore, TurretStore, EconomyStore, etc.)
   - `SimData/` - Simulation data structs (CreepSimData, TurretSimData, etc.)
   - `Systems/` - Game logic systems (SpawnSystem, MovementSystem, DamageSystem, etc.)
   - `Components/` - Thin MonoBehaviour components for scene objects
   - `Input/` - Input bridge classes (PlacementInput)
   - `Presentation/` - Visual sync and UI (PresentationAdapter, HUDs, GameUiCoordinator)
-  - `Data/` - ScriptableObject definitions (CreepDefinitions, TurretDefinitions, SpawnConfig, etc.)
+  - `Data/` - ScriptableObject definitions (CreepDefinitions, TurretDefinitions, WaveConfig, etc.)
 - `Assets/Tests/Editor/` - Edit Mode unit and integration tests
 - `Docs/` - TDD, architecture diagrams, project status
 
@@ -51,9 +51,9 @@ Creep attributes (speed, HP, damage to base, coin reward) are configured via the
 3. On the `GameFlowController` GameObject, assign:
    - TurretDefinitions ScriptableObject
    - CreepDefinitions ScriptableObject
-   - SpawnConfig, BaseConfig, EconomyConfig SOs
+   - WaveConfig, BaseConfig, EconomyConfig SOs
    - Turret, creep, and projectile prefabs (assigned in definitions SOs)
-   - HomeBase, SpawnPoints, UIDocument, LosePopup prefab
+   - HomeBase, SpawnPoints, UIDocument, LosePopup prefab, WinPopup prefab
    - Terrain LayerMask
 4. Enter Play Mode
 

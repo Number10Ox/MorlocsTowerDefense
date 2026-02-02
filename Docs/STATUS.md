@@ -6,10 +6,10 @@
 |---------|--------|-------|
 | 1. Core Functionality | Complete | All key systems documented |
 | 2. Architecture - Guiding Principles | Complete | 6 principles established |
-| 2. Architecture - Detailed Design | In progress | Composition root, state machine, system scheduler, store pattern, economy documented |
+| 2. Architecture - Detailed Design | In progress | Composition root, state machine, system scheduler, store pattern, economy, wave system documented |
 | 3. Constraints & Ground Rules | Complete | 9 constraints from spec + tool constraint |
 | 4. Tech Package Choices | Complete | Input System, UI Toolkit, UGUI (provided popups), Addressables (SO data), Cinemachine dropped |
-| 5. Data Configuration Strategy | In progress | CreepTypeDefinition/CreepDefinitions SO (replaces CreepDef), SpawnConfig, BaseConfig, EconomyConfig SOs defined; TurretTypeDefinition refactored to [Serializable] struct inside TurretDefinitions SO; WaveDef planned for Story 9 |
+| 5. Data Configuration Strategy | Complete | CreepTypeDefinition/CreepDefinitions SO, BaseConfig, EconomyConfig, TurretDefinitions SOs; WaveConfig SO with WaveDefinition/WaveEntryDefinition structs (Story 9). SpawnConfig retired. |
 | 6. Provided Assets Reference | Complete | All prefabs, scene, terrain, materials cataloged |
 | 7. Deliverables - User Stories | Complete | Stories 1-10 with acceptance criteria |
 
@@ -25,7 +25,7 @@
 | Story 6: Economy System | Complete | EconomyStore, EconomySystem (Phase 3), EconomyConfig SO, CoinHud (UI Toolkit), PlacementSystem affordability gate, DamageSystem OnCreepKilled carries reward, CoinReward on CreepSimData/CreepDef, cost on TurretTypeDefinition |
 | Story 7: Turret Types (Regular & Freezing) | Complete | TurretType enum, TurretTypeStats struct (with Type field), TurretSelectionStore (defaultType constructor), TurretSelectionHud (dynamic generation from TurretTypeStats[]), slow effect system (DamageSystem writes, MovementSystem reads), per-type costs via IReadOnlyDictionary, data-driven keyboard selection (1-9), dictionary-based turret pools. Refactored to data-driven: TurretDefinitions SO + TurretTypeDirectoryBuilder/TurretTypeDirectory. Adding a new turret type requires zero code changes. PresentationAdapter refactored to use TurretVisual struct dictionary instead of separate turretMap/turretSourcePool. TurretDefinitions.OnValidate detects duplicate TurretType entries. |
 | Story 8: Creep Variety | Complete | CreepType enum, CreepTypeStats struct, CreepTypeDefinition struct, CreepDefinitions SO, CreepTypeDirectoryBuilder/CreepTypeDirectory (mirrors turret pattern), SpawnSystem round-robin per-creep cycling, PresentationAdapter per-type creep pools with CreepVisual struct, Type field on CreepSimData. Old CreepDef SO deleted. |
-| Story 9: Wave System | Not started | |
+| Story 9: Wave System | Complete | WaveSystem (wave progression, phase machine), WaveStore (spawn queue + wave state), WaveConfig SO (WaveDefinition/WaveEntryDefinition structs), SpawnSystem refactored to queue consumer, WinState, PlayingState dual end-condition polling (lose priority), GameUiCoordinator win popup, pool sizing derived from wave data. SpawnConfig retired. |
 | Story 10: Game Reset | Not started | |
 
 ## Key Decisions Made
@@ -88,9 +88,17 @@
 - **Per-creep round-robin cycling**: `SpawnSystem` advances `currentTypeIndex` after each individual creep spawn (not per burst). This produces visible Small/Big alternation even with a single spawn point. `Reset()` resets the index.
 - **Per-type creep pools with CreepVisual struct**: `PresentationAdapter` manages `IReadOnlyDictionary<CreepType, GameObjectPool> creepPoolByType`. Uses `CreepVisual` struct (mirrors `TurretVisual`) to track each creep's source pool for correct return-to-pool. Pool budget split across types (`CeilToInt(total / typeCount)`) — not multiplied.
 - **CreepDef deleted**: Replaced entirely by `CreepDefinitions` with `CreepTypeDefinition` entries. No migration needed — old asset removed.
-- **Temporary round-robin spawning for testability**: Story 8 has no wave system yet (Story 9), but round-robin cycling through `orderedStats` makes multiple creep types visually testable in Play Mode without waves.
+- **SpawnSystem refactored to queue consumer (Story 9)**: Timer-driven spawning with round-robin type cycling replaced by queue consumption from `WaveStore.SpawnQueue`. `WaveSystem` decides WHAT and WHEN; `SpawnSystem` decides WHERE (round-robin spawn positions) and creates `CreepSimData`. Wave definitions are scene-independent.
+- **WaveSystem scene-independent**: `WaveSystem` only enqueues `CreepType` values — no spawn positions, no `Vector3`. Wave definitions reusable across different scene layouts.
+- **Wave-cleared = queue empty + creeps empty**: `SpawnQueue.Count == 0 && ActiveCreeps.Count == 0`. No per-wave creep tracking needed since one wave is active at a time. `WaveSystem` checks clear condition before enqueuing new spawns in the same tick.
+- **Lose takes priority over win**: `PlayingState` checks `BaseDestroyed` first, then `AllWavesCleared`. Once either fires, subsequent ticks are no-ops (one-shot guards + early return).
+- **WinPopup via GameUiCoordinator**: Mirrors LosePopup pattern. `OnStateChanged` instantiates from prefab on enter `GameState.Win`, destroys on exit.
+- **WaveConfig replaces SpawnConfig**: `WaveConfig` SO contains ordered `WaveDefinition[]` array. Each wave has `WaveEntryDefinition[]` entries and `delayBeforeStart`. Each entry specifies `CreepType`, `count` (total, not per-spawn-point), and `spawnInterval`. SpawnConfig file remains in codebase but is no longer referenced.
+- **Burst cap in WaveSystem**: `MAX_SPAWNS_PER_TICK = 20` prevents hitching on large deltaTime spikes (matches pattern from prior SpawnSystem).
+- **Time carry-over precision**: When `WaitingToStart` delay elapses mid-tick, only excess time after the delay flows into spawning phase via return value pattern. Prevents first-tick over-spawning.
+- **Pool sizing from wave data**: `MaxCreepsInAnyWave(waveConfig.Waves) * 2` replaces old SpawnConfig-based calculation. Dynamically adapts to wave content.
+- **WaveStore events for future use**: `OnWaveStarted(int)` and `OnWaveCleared(int)` events exist for future wave HUD. No wave HUD in current scope.
 
 ## Open Questions
 
-- Addressables loading infrastructure (deferred until extensibility is needed, likely Story 8)
-- Remaining Data Configuration Strategy entries (wave defs)
+- Addressables loading infrastructure (deferred until extensibility is needed)

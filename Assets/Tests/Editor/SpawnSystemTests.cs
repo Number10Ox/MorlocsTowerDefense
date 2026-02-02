@@ -1,15 +1,16 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
 public class SpawnSystemTests
 {
-    private CreepStore store;
+    private CreepStore creepStore;
+    private WaveStore waveStore;
     private Vector3[] twoSpawnPoints;
     private Vector3 basePosition;
+    private Dictionary<CreepType, CreepTypeStats> statsByType;
 
     private const float DEFAULT_SPEED = 5f;
-    private const float DEFAULT_INTERVAL = 1f;
-    private const int DEFAULT_PER_SPAWN = 1;
     private const int DEFAULT_DAMAGE_TO_BASE = 1;
     private const int DEFAULT_MAX_HEALTH = 3;
     private const int DEFAULT_COIN_REWARD = 1;
@@ -17,249 +18,298 @@ public class SpawnSystemTests
     [SetUp]
     public void SetUp()
     {
-        store = new CreepStore();
+        creepStore = new CreepStore();
+        waveStore = new WaveStore();
         twoSpawnPoints = new[] { new Vector3(10f, 0f, 0f), new Vector3(-10f, 0f, 0f) };
         basePosition = Vector3.zero;
+        statsByType = new Dictionary<CreepType, CreepTypeStats>
+        {
+            { CreepType.Small, new CreepTypeStats(CreepType.Small, DEFAULT_SPEED, DEFAULT_DAMAGE_TO_BASE, DEFAULT_MAX_HEALTH, DEFAULT_COIN_REWARD) },
+            { CreepType.Big, new CreepTypeStats(CreepType.Big, 2f, 3, 10, 5) }
+        };
     }
 
     private SpawnSystem MakeSystem(
         Vector3[] spawnPositions = null,
-        float interval = DEFAULT_INTERVAL,
-        int perSpawn = DEFAULT_PER_SPAWN,
-        CreepTypeStats[] orderedStats = null)
+        Dictionary<CreepType, CreepTypeStats> stats = null)
     {
-        orderedStats ??= new CreepTypeStats[]
-        {
-            new CreepTypeStats(
-                CreepType.Small,
-                DEFAULT_SPEED,
-                DEFAULT_DAMAGE_TO_BASE,
-                DEFAULT_MAX_HEALTH,
-                DEFAULT_COIN_REWARD)
-        };
-
         return new SpawnSystem(
-            store,
+            creepStore,
+            waveStore,
             spawnPositions ?? twoSpawnPoints,
             basePosition,
-            interval,
-            perSpawn,
-            orderedStats);
+            stats ?? statsByType);
     }
 
-    [Test]
-    public void Tick_BeforeIntervalElapsed_NoCreepsSpawned()
-    {
-        var system = MakeSystem();
-
-        system.Tick(0.5f);
-
-        Assert.AreEqual(0, store.ActiveCreeps.Count);
-    }
+    // --- Empty queue ---
 
     [Test]
-    public void Tick_IntervalElapsed_SpawnsCreepsAtAllSpawnPoints()
+    public void Tick_EmptyQueue_NoCreepsSpawned()
     {
         var system = MakeSystem();
 
         system.Tick(1.0f);
 
-        Assert.AreEqual(2, store.ActiveCreeps.Count);
+        Assert.AreEqual(0, creepStore.ActiveCreeps.Count);
     }
 
+    // --- Single request ---
+
     [Test]
-    public void Tick_IntervalElapsed_CreepsHaveCorrectPositions()
+    public void Tick_SingleRequest_CreatesOneCreep()
     {
         var system = MakeSystem();
+        waveStore.EnqueueSpawn(CreepType.Small);
 
-        system.Tick(1.0f);
+        system.Tick(0f);
 
-        Assert.AreEqual(twoSpawnPoints[0], store.ActiveCreeps[0].Position);
-        Assert.AreEqual(twoSpawnPoints[1], store.ActiveCreeps[1].Position);
+        Assert.AreEqual(1, creepStore.ActiveCreeps.Count);
     }
 
     [Test]
-    public void Tick_IntervalElapsed_CreepsHaveCorrectTarget()
+    public void Tick_SingleRequest_CreepHasCorrectType()
     {
         var system = MakeSystem();
+        waveStore.EnqueueSpawn(CreepType.Small);
 
-        system.Tick(1.0f);
+        system.Tick(0f);
 
-        Assert.AreEqual(basePosition, store.ActiveCreeps[0].Target);
-        Assert.AreEqual(basePosition, store.ActiveCreeps[1].Target);
+        Assert.AreEqual(CreepType.Small, creepStore.ActiveCreeps[0].Type);
     }
 
     [Test]
-    public void Tick_IntervalElapsed_CreepsHaveCorrectSpeed()
+    public void Tick_SingleRequest_CreepHasCorrectTarget()
     {
-        var stats = new CreepTypeStats[]
+        var system = MakeSystem();
+        waveStore.EnqueueSpawn(CreepType.Small);
+
+        system.Tick(0f);
+
+        Assert.AreEqual(basePosition, creepStore.ActiveCreeps[0].Target);
+    }
+
+    [Test]
+    public void Tick_SingleRequest_CreepHasCorrectStats()
+    {
+        var system = MakeSystem();
+        waveStore.EnqueueSpawn(CreepType.Small);
+
+        system.Tick(0f);
+
+        var creep = creepStore.ActiveCreeps[0];
+        Assert.AreEqual(DEFAULT_SPEED, creep.Speed, 0.001f);
+        Assert.AreEqual(DEFAULT_DAMAGE_TO_BASE, creep.DamageToBase);
+        Assert.AreEqual(DEFAULT_MAX_HEALTH, creep.Health);
+        Assert.AreEqual(DEFAULT_MAX_HEALTH, creep.MaxHealth);
+        Assert.AreEqual(DEFAULT_COIN_REWARD, creep.CoinReward);
+    }
+
+    // --- Multiple requests ---
+
+    [Test]
+    public void Tick_MultipleRequests_CreatesAll()
+    {
+        var system = MakeSystem();
+        waveStore.EnqueueSpawn(CreepType.Small);
+        waveStore.EnqueueSpawn(CreepType.Big);
+        waveStore.EnqueueSpawn(CreepType.Small);
+
+        system.Tick(0f);
+
+        Assert.AreEqual(3, creepStore.ActiveCreeps.Count);
+    }
+
+    [Test]
+    public void Tick_MultipleRequests_CreepsHaveUniqueIds()
+    {
+        var system = MakeSystem();
+        waveStore.EnqueueSpawn(CreepType.Small);
+        waveStore.EnqueueSpawn(CreepType.Small);
+
+        system.Tick(0f);
+
+        Assert.AreNotEqual(creepStore.ActiveCreeps[0].Id, creepStore.ActiveCreeps[1].Id);
+    }
+
+    [Test]
+    public void Tick_BigCreep_HasBigStats()
+    {
+        var system = MakeSystem();
+        waveStore.EnqueueSpawn(CreepType.Big);
+
+        system.Tick(0f);
+
+        var creep = creepStore.ActiveCreeps[0];
+        Assert.AreEqual(CreepType.Big, creep.Type);
+        Assert.AreEqual(2f, creep.Speed, 0.001f);
+        Assert.AreEqual(3, creep.DamageToBase);
+        Assert.AreEqual(10, creep.Health);
+        Assert.AreEqual(10, creep.MaxHealth);
+        Assert.AreEqual(5, creep.CoinReward);
+    }
+
+    // --- Round-robin position assignment ---
+
+    [Test]
+    public void Tick_PositionsAssignedRoundRobin()
+    {
+        var system = MakeSystem();
+        waveStore.EnqueueSpawn(CreepType.Small);
+        waveStore.EnqueueSpawn(CreepType.Small);
+        waveStore.EnqueueSpawn(CreepType.Small);
+
+        system.Tick(0f);
+
+        Assert.AreEqual(twoSpawnPoints[0], creepStore.ActiveCreeps[0].Position);
+        Assert.AreEqual(twoSpawnPoints[1], creepStore.ActiveCreeps[1].Position);
+        Assert.AreEqual(twoSpawnPoints[0], creepStore.ActiveCreeps[2].Position);
+    }
+
+    [Test]
+    public void Tick_SingleSpawnPoint_AllCreepsAtSamePosition()
+    {
+        var singlePoint = new[] { new Vector3(5f, 0f, 0f) };
+        var system = MakeSystem(spawnPositions: singlePoint);
+        waveStore.EnqueueSpawn(CreepType.Small);
+        waveStore.EnqueueSpawn(CreepType.Small);
+
+        system.Tick(0f);
+
+        Assert.AreEqual(singlePoint[0], creepStore.ActiveCreeps[0].Position);
+        Assert.AreEqual(singlePoint[0], creepStore.ActiveCreeps[1].Position);
+    }
+
+    // --- Queue consumption ---
+
+    [Test]
+    public void Tick_ConsumesQueue_QueueEmptyAfterTick()
+    {
+        var system = MakeSystem();
+        waveStore.EnqueueSpawn(CreepType.Small);
+        waveStore.EnqueueSpawn(CreepType.Big);
+
+        system.Tick(0f);
+
+        Assert.AreEqual(0, waveStore.SpawnQueue.Count);
+    }
+
+    // --- Unknown type ---
+
+    [Test]
+    public void Tick_UnknownCreepType_SkipsCreep()
+    {
+        var limitedStats = new Dictionary<CreepType, CreepTypeStats>
         {
-            new CreepTypeStats(CreepType.Small, 7f, DEFAULT_DAMAGE_TO_BASE, DEFAULT_MAX_HEALTH, DEFAULT_COIN_REWARD)
+            { CreepType.Small, new CreepTypeStats(CreepType.Small, DEFAULT_SPEED, DEFAULT_DAMAGE_TO_BASE, DEFAULT_MAX_HEALTH, DEFAULT_COIN_REWARD) }
         };
-        var system = MakeSystem(orderedStats: stats);
+        var system = MakeSystem(stats: limitedStats);
+        waveStore.EnqueueSpawn(CreepType.Big); // Not in stats
 
-        system.Tick(1.0f);
+        system.Tick(0f);
 
-        Assert.AreEqual(7f, store.ActiveCreeps[0].Speed, 0.001f);
+        Assert.AreEqual(0, creepStore.ActiveCreeps.Count);
     }
+
+    // --- No spawn points ---
 
     [Test]
-    public void Tick_IntervalElapsed_CreepsHaveUniqueIds()
+    public void Tick_NoSpawnPoints_NoCreepsAndQueuePreserved()
     {
-        var system = MakeSystem();
+        var system = MakeSystem(spawnPositions: new Vector3[0]);
+        waveStore.EnqueueSpawn(CreepType.Small);
 
-        system.Tick(1.0f);
+        system.Tick(0f);
 
-        Assert.AreNotEqual(store.ActiveCreeps[0].Id, store.ActiveCreeps[1].Id);
+        Assert.AreEqual(0, creepStore.ActiveCreeps.Count);
+        Assert.AreEqual(1, waveStore.SpawnQueue.Count,
+            "Queue should not be consumed when there are no spawn positions");
     }
 
-    [Test]
-    public void Tick_MultipleIntervalsElapsed_SpawnsMultipleBursts()
-    {
-        var system = MakeSystem();
-
-        system.Tick(2.5f);
-
-        Assert.AreEqual(4, store.ActiveCreeps.Count);
-    }
-
-    [Test]
-    public void Tick_CreepsPerSpawnGreaterThanOne_SpawnsCorrectCount()
-    {
-        var system = MakeSystem(perSpawn: 3);
-
-        system.Tick(1.0f);
-
-        Assert.AreEqual(6, store.ActiveCreeps.Count);
-    }
+    // --- SpawnedThisFrame ---
 
     [Test]
     public void Tick_SpawnedThisFrame_PopulatedAfterSpawn()
     {
         var system = MakeSystem();
+        waveStore.EnqueueSpawn(CreepType.Small);
 
-        system.Tick(1.0f);
+        system.Tick(0f);
 
-        Assert.AreEqual(2, store.SpawnedThisFrame.Count);
-    }
-
-    [Test]
-    public void Tick_SpawnedThisFrame_EmptyOnNonSpawnTick()
-    {
-        var system = MakeSystem();
-
-        system.Tick(1.0f);
-        store.BeginFrame();
-        system.Tick(0.1f);
-
-        Assert.AreEqual(0, store.SpawnedThisFrame.Count);
+        Assert.AreEqual(1, creepStore.SpawnedThisFrame.Count);
     }
 
     [Test]
     public void Tick_SpawnedThisFrame_ClearedByBeginFrame()
     {
         var system = MakeSystem();
+        waveStore.EnqueueSpawn(CreepType.Small);
+        system.Tick(0f);
+        Assert.AreEqual(1, creepStore.SpawnedThisFrame.Count);
 
-        system.Tick(1.0f);
-        Assert.AreEqual(2, store.SpawnedThisFrame.Count);
+        creepStore.BeginFrame();
 
-        store.BeginFrame();
+        Assert.AreEqual(0, creepStore.SpawnedThisFrame.Count);
+    }
 
-        Assert.AreEqual(0, store.SpawnedThisFrame.Count);
+    // --- Reset ---
+
+    [Test]
+    public void Reset_ResetsCreepIdCounter()
+    {
+        var system = MakeSystem();
+        waveStore.EnqueueSpawn(CreepType.Small);
+        system.Tick(0f);
+
+        system.Reset();
+        waveStore.EnqueueSpawn(CreepType.Small);
+        system.Tick(0f);
+
+        // After reset, IDs start from 0 again
+        Assert.AreEqual(0, creepStore.ActiveCreeps[1].Id);
     }
 
     [Test]
-    public void Tick_NoSpawnPoints_DoesNotThrow()
+    public void Reset_ResetsSpawnIndex()
     {
-        var system = MakeSystem(spawnPositions: new Vector3[0]);
+        var system = MakeSystem();
+        waveStore.EnqueueSpawn(CreepType.Small); // position index 0
+        system.Tick(0f);
 
-        Assert.DoesNotThrow(() => system.Tick(1.0f));
-        Assert.AreEqual(0, store.ActiveCreeps.Count);
+        system.Reset();
+        creepStore.BeginFrame();
+        waveStore.EnqueueSpawn(CreepType.Small); // should be position index 0 again
+        system.Tick(0f);
+
+        Assert.AreEqual(twoSpawnPoints[0], creepStore.ActiveCreeps[0].Position);
+    }
+
+    // --- Constructor null checks ---
+
+    [Test]
+    public void Constructor_NullCreepStore_Throws()
+    {
+        Assert.Throws<System.ArgumentNullException>(() =>
+            new SpawnSystem(null, waveStore, twoSpawnPoints, basePosition, statsByType));
     }
 
     [Test]
-    public void Tick_ZeroInterval_DoesNotSpawn()
+    public void Constructor_NullWaveStore_Throws()
     {
-        var system = MakeSystem(interval: 0f);
-
-        Assert.DoesNotThrow(() => system.Tick(1.0f));
-        Assert.AreEqual(0, store.ActiveCreeps.Count);
+        Assert.Throws<System.ArgumentNullException>(() =>
+            new SpawnSystem(creepStore, null, twoSpawnPoints, basePosition, statsByType));
     }
 
     [Test]
-    public void Tick_NegativeInterval_DoesNotSpawn()
+    public void Constructor_NullSpawnPositions_Throws()
     {
-        var system = MakeSystem(interval: -1f);
-
-        Assert.DoesNotThrow(() => system.Tick(1.0f));
-        Assert.AreEqual(0, store.ActiveCreeps.Count);
+        Assert.Throws<System.ArgumentNullException>(() =>
+            new SpawnSystem(creepStore, waveStore, null, basePosition, statsByType));
     }
 
     [Test]
-    public void Tick_LargeDeltaTime_CappedAtMaxBurstsPerTick()
+    public void Constructor_NullStatsByType_Throws()
     {
-        // interval=0.5, deltaTime=3.0 → 6 bursts needed, but capped at 5
-        var system = MakeSystem(interval: 0.5f);
-
-        system.Tick(3.0f);
-
-        // 5 bursts × 2 spawn points × 1 per spawn = 10
-        Assert.AreEqual(10, store.ActiveCreeps.Count);
-    }
-
-    [Test]
-    public void Tick_IntervalElapsed_CreepsHaveCorrectDamageToBase()
-    {
-        var stats = new CreepTypeStats[]
-        {
-            new CreepTypeStats(CreepType.Small, DEFAULT_SPEED, 5, DEFAULT_MAX_HEALTH, DEFAULT_COIN_REWARD)
-        };
-        var system = MakeSystem(orderedStats: stats);
-
-        system.Tick(1.0f);
-
-        Assert.AreEqual(5, store.ActiveCreeps[0].DamageToBase);
-        Assert.AreEqual(5, store.ActiveCreeps[1].DamageToBase);
-    }
-
-    [Test]
-    public void Tick_IntervalElapsed_CreepsHaveCorrectHealth()
-    {
-        var stats = new CreepTypeStats[]
-        {
-            new CreepTypeStats(CreepType.Small, DEFAULT_SPEED, DEFAULT_DAMAGE_TO_BASE, 5, DEFAULT_COIN_REWARD)
-        };
-        var system = MakeSystem(orderedStats: stats);
-
-        system.Tick(1.0f);
-
-        Assert.AreEqual(5, store.ActiveCreeps[0].Health);
-        Assert.AreEqual(5, store.ActiveCreeps[0].MaxHealth);
-        Assert.AreEqual(5, store.ActiveCreeps[1].Health);
-        Assert.AreEqual(5, store.ActiveCreeps[1].MaxHealth);
-    }
-
-    [Test]
-    public void Tick_IntervalElapsed_CreepsHaveCorrectCoinReward()
-    {
-        var stats = new CreepTypeStats[]
-        {
-            new CreepTypeStats(CreepType.Small, DEFAULT_SPEED, DEFAULT_DAMAGE_TO_BASE, DEFAULT_MAX_HEALTH, 3)
-        };
-        var system = MakeSystem(orderedStats: stats);
-
-        system.Tick(1.0f);
-
-        Assert.AreEqual(3, store.ActiveCreeps[0].CoinReward);
-        Assert.AreEqual(3, store.ActiveCreeps[1].CoinReward);
-    }
-
-    [Test]
-    public void Tick_EmptyOrderedStats_DoesNotSpawn()
-    {
-        var system = MakeSystem(orderedStats: new CreepTypeStats[0]);
-
-        Assert.DoesNotThrow(() => system.Tick(1.0f));
-        Assert.AreEqual(0, store.ActiveCreeps.Count);
+        Assert.Throws<System.ArgumentNullException>(() =>
+            new SpawnSystem(creepStore, waveStore, twoSpawnPoints, basePosition, null));
     }
 }

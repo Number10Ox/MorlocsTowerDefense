@@ -6,20 +6,20 @@ using UnityEngine.UIElements;
 // in Awake. Drives per-frame tick: input -> state -> systems -> visuals.
 public class GameFlowController : MonoBehaviour
 {
-    private const int POOL_SIZE_MULTIPLIER = 10;
     private const int INITIAL_TURRET_POOL_SIZE = 20;
     private const int INITIAL_PROJECTILE_POOL_SIZE = 50;
 
     [SerializeField] private HomeBaseComponent homeBase;
     [SerializeField] private SpawnPointComponent[] spawnPoints;
     [SerializeField] private GameObject projectilePrefab;
-    [SerializeField] private SpawnConfig spawnConfig;
+    [SerializeField] private WaveConfig waveConfig;
     [SerializeField] private CreepDefinitions creepDefinitions;
     [SerializeField] private TurretDefinitions turretDefinitions;
     [SerializeField] private BaseConfig baseConfig;
     [SerializeField] private EconomyConfig economyConfig;
     [SerializeField] private LayerMask terrainLayerMask;
     [SerializeField] private GameObject losePopupPrefab;
+    [SerializeField] private GameObject winPopupPrefab;
     [SerializeField] private UIDocument hudDocument;
 
     private GameStateMachine stateMachine;
@@ -44,9 +44,9 @@ public class GameFlowController : MonoBehaviour
             return;
         }
 
-        if (spawnConfig == null)
+        if (waveConfig == null)
         {
-            Debug.LogError("GameFlowController: SpawnConfig reference is not assigned.");
+            Debug.LogError("GameFlowController: WaveConfig reference is not assigned.");
             enabled = false;
             return;
         }
@@ -112,6 +112,12 @@ public class GameFlowController : MonoBehaviour
             return;
         }
 
+        if (!ValidateWaveCreepTypes(waveConfig.Waves, creepDirectory.StatsByType))
+        {
+            enabled = false;
+            return;
+        }
+
         Vector3 basePosition = homeBase.transform.position;
         Vector3[] spawnPositions = ExtractSpawnPositions();
 
@@ -119,13 +125,17 @@ public class GameFlowController : MonoBehaviour
         gameSession = new GameSession(baseConfig.MaxHealth, economyConfig.StartingCoins, defaultType);
 
         // Phase 1 — World Update
+        var waveSystem = new WaveSystem(
+            gameSession.WaveStore,
+            gameSession.CreepStore,
+            waveConfig.Waves);
+
         var spawnSystem = new SpawnSystem(
             gameSession.CreepStore,
+            gameSession.WaveStore,
             spawnPositions,
             basePosition,
-            spawnConfig.SpawnInterval,
-            spawnConfig.CreepsPerSpawn,
-            creepDirectory.OrderedStats);
+            creepDirectory.StatsByType);
 
         var movementSystem = new MovementSystem(gameSession.CreepStore);
 
@@ -156,8 +166,8 @@ public class GameFlowController : MonoBehaviour
 
         damageSystem.OnCreepKilled += economySystem.HandleCreepKilled;
 
-        int totalCreepPoolSize = (spawnPositions.Length > 0 ? spawnPositions.Length : 1)
-                                 * spawnConfig.CreepsPerSpawn * POOL_SIZE_MULTIPLIER;
+        int maxCreepsInWave = MaxCreepsInAnyWave(waveConfig.Waves);
+        int totalCreepPoolSize = Mathf.Max(maxCreepsInWave, 1) * 2;
         int creepTypeCount = Mathf.Max(1, creepDirectory.OrderedTypes.Length);
         int perTypeCreepPoolSize = Mathf.CeilToInt((float)totalCreepPoolSize / creepTypeCount);
 
@@ -193,7 +203,7 @@ public class GameFlowController : MonoBehaviour
         systemScheduler = new SystemScheduler(new IGameSystem[]
         {
             // Phase 1 — World Update
-            spawnSystem, movementSystem, placementSystem,
+            waveSystem, spawnSystem, movementSystem, placementSystem,
             // Phase 2 — Combat
             projectileSystem, damageSystem,
             // Phase 3 — Resolution
@@ -203,16 +213,18 @@ public class GameFlowController : MonoBehaviour
         stateMachine = new GameStateMachine();
 
         var initState = new InitState(stateMachine.Fire, homeBase);
-        var playingState = new PlayingState(stateMachine.Fire, gameSession.BaseStore);
+        var playingState = new PlayingState(stateMachine.Fire, gameSession.BaseStore, gameSession.WaveStore);
         var loseState = new LoseState(stateMachine.Fire);
+        var winState = new WinState(stateMachine.Fire);
 
         stateMachine.AddState(GameState.Init, initState);
         stateMachine.AddState(GameState.Playing, playingState);
         stateMachine.AddState(GameState.Lose, loseState);
+        stateMachine.AddState(GameState.Win, winState);
 
         stateMachine.AddTransition(GameState.Init, GameTrigger.SceneValidated, GameState.Playing);
         stateMachine.AddTransition(GameState.Playing, GameTrigger.BaseDestroyed, GameState.Lose);
-        // Win transition registered when WinState is implemented (Story 9)
+        stateMachine.AddTransition(GameState.Playing, GameTrigger.AllWavesCleared, GameState.Win);
         // Restart transitions registered when RestartState is implemented (Story 10)
 
         BaseHealthHud baseHealthHud = null;
@@ -234,6 +246,7 @@ public class GameFlowController : MonoBehaviour
             coinHud,
             turretSelectionHud,
             losePopupPrefab,
+            winPopupPrefab,
             transform);
     }
 
@@ -264,6 +277,48 @@ public class GameFlowController : MonoBehaviour
     {
         uiCoordinator?.Teardown();
         uiCoordinator = null;
+    }
+
+    private static int MaxCreepsInAnyWave(WaveDefinition[] waves)
+    {
+        int max = 0;
+        for (int w = 0; w < waves.Length; w++)
+        {
+            int waveTotal = 0;
+            var entries = waves[w].Entries;
+            if (entries != null)
+            {
+                for (int e = 0; e < entries.Length; e++)
+                {
+                    waveTotal += entries[e].Count;
+                }
+            }
+            if (waveTotal > max) max = waveTotal;
+        }
+        return max;
+    }
+
+    private static bool ValidateWaveCreepTypes(
+        WaveDefinition[] waves,
+        IReadOnlyDictionary<CreepType, CreepTypeStats> statsByType)
+    {
+        for (int w = 0; w < waves.Length; w++)
+        {
+            var entries = waves[w].Entries;
+            if (entries == null) continue;
+            for (int e = 0; e < entries.Length; e++)
+            {
+                CreepType type = entries[e].CreepType;
+                if (!statsByType.ContainsKey(type))
+                {
+                    Debug.LogError(
+                        $"GameFlowController: Wave {w} entry {e} references CreepType {type} " +
+                        "which has no stats in CreepDefinitions.");
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private Vector3[] ExtractSpawnPositions()

@@ -1,34 +1,46 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
 public class CreepSpawningIntegrationTests
 {
     private CreepStore store;
+    private WaveStore waveStore;
     private SpawnSystem spawnSystem;
     private MovementSystem movementSystem;
 
-    private static readonly CreepTypeStats[] DefaultStats = new CreepTypeStats[]
-    {
-        new CreepTypeStats(CreepType.Small, 10f, 1, 3, 1)
-    };
+    private static readonly IReadOnlyDictionary<CreepType, CreepTypeStats> DefaultStatsByType =
+        new Dictionary<CreepType, CreepTypeStats>
+        {
+            { CreepType.Small, new CreepTypeStats(CreepType.Small, 10f, 1, 3, 1) }
+        };
 
     [SetUp]
     public void SetUp()
     {
         store = new CreepStore();
+        waveStore = new WaveStore();
 
         var spawnPositions = new[] { new Vector3(10f, 0f, 0f) };
         var basePosition = Vector3.zero;
 
         spawnSystem = new SpawnSystem(
             store,
+            waveStore,
             spawnPositions,
             basePosition,
-            spawnInterval: 1f,
-            creepsPerSpawn: 1,
-            DefaultStats);
+            DefaultStatsByType);
 
         movementSystem = new MovementSystem(store, arrivalThreshold: 0.5f);
+    }
+
+    private void EnqueueAndSpawn(int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            waveStore.EnqueueSpawn(CreepType.Small);
+        }
+        spawnSystem.Tick(0f);
     }
 
     [Test]
@@ -36,7 +48,7 @@ public class CreepSpawningIntegrationTests
     {
         // Frame 1: BeginFrame + SpawnSystem spawns a creep
         store.BeginFrame();
-        spawnSystem.Tick(1.0f);
+        EnqueueAndSpawn(1);
         Assert.AreEqual(1, store.ActiveCreeps.Count);
         Assert.AreEqual(1, store.SpawnedThisFrame.Count);
 
@@ -73,18 +85,20 @@ public class CreepSpawningIntegrationTests
     public void MultipleCreeps_IndependentLifecycles()
     {
         var twoPointStore = new CreepStore();
+        var twoPointWaveStore = new WaveStore();
         var twoPointSpawn = new SpawnSystem(
             twoPointStore,
+            twoPointWaveStore,
             new[] { new Vector3(5f, 0f, 0f), new Vector3(20f, 0f, 0f) },
             Vector3.zero,
-            spawnInterval: 1f,
-            creepsPerSpawn: 1,
-            DefaultStats);
+            DefaultStatsByType);
         var twoPointMovement = new MovementSystem(twoPointStore, arrivalThreshold: 0.5f);
 
-        // Frame 1: Spawn both creeps
+        // Frame 1: Enqueue and spawn 2 creeps (one per spawn point via round-robin)
         twoPointStore.BeginFrame();
-        twoPointSpawn.Tick(1.0f);
+        twoPointWaveStore.EnqueueSpawn(CreepType.Small);
+        twoPointWaveStore.EnqueueSpawn(CreepType.Small);
+        twoPointSpawn.Tick(0f);
         Assert.AreEqual(2, twoPointStore.ActiveCreeps.Count);
 
         // Identify creeps by spawn position (don't assume ID assignment order)

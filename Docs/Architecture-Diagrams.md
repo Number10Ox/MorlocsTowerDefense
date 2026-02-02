@@ -111,7 +111,7 @@ classDiagram
 - `SystemScheduler` is a **plain C# class** owned by `GameFlowController`. It holds the ordered `IGameSystem[]` array and ticks them sequentially. `GameFlowController.Update()` gates the scheduler — systems only tick when the state machine is in a gameplay state (e.g., `Playing`). This separates flow control (states) from system execution (scheduler).
 - `IGameSystem` provides a uniform `Tick()` contract for gameplay systems. Systems are global — they exist independently of game states.
 - `PresentationAdapter` is a **plain C# class** owned by `GameFlowController`. It is the only place that calls Unity input and rendering APIs. Systems never reference it directly — they read input structs it produces and write sim data it consumes. Stub in Story 1; gains responsibilities as systems are added.
-- `Win` and `Lose` states appear in the enum but are implemented in later stories.
+- All four states (`Init`, `Playing`, `Win`, `Lose`) and their `IGameState` implementations exist. `WinState` and `LoseState` are empty shells — presentation (popups, HUD toggling) is handled by `GameUiCoordinator`.
 - `GameTrigger` values are added incrementally as stories introduce new transitions.
 
 ---
@@ -141,7 +141,7 @@ stateDiagram-v2
     }
 ```
 
-**Story 1 scope:** Only `Init` and `Playing` are implemented. `Win` and `Lose` are placeholders in the enum — their `IGameState` classes come in Stories 3 and 9.
+**Story 1 scope:** All four states are implemented. `Init` and `Playing` contain logic; `Win` and `Lose` are empty shells. Presentation concerns (popups, HUD toggling) are handled by `GameUiCoordinator.OnStateChanged`.
 
 **Reset path:** Restart from Win/Lose transitions back to `Init`. `PlayingState.Exit()` tears down spawned objects and system state. `InitState.Enter()` re-validates and sets up a fresh game. No residual state.
 
@@ -165,7 +165,7 @@ sequenceDiagram
     Bootstrap->>SM: new GameStateMachine()
     Bootstrap->>Sched: new SystemScheduler(systems[])
     Bootstrap->>Init: new InitState(sm.Fire, homeBase)
-    Bootstrap->>Playing: new PlayingState(sm.Fire, baseStore)
+    Bootstrap->>Playing: new PlayingState(sm.Fire, baseStore, waveStore)
     Bootstrap->>SM: AddState(Init, initState)
     Bootstrap->>SM: AddState(Playing, playingState)
     Bootstrap->>SM: AddTransition(Init, SceneValidated, Playing)
@@ -330,6 +330,7 @@ Assets/
 │   ├── States/                   # IGameState implementations
 │   │   ├── InitState.cs
 │   │   ├── PlayingState.cs
+│   │   ├── WinState.cs
 │   │   └── LoseState.cs
 │   ├── Stores/                   # Authoritative data containers
 │   │   ├── CreepStore.cs
@@ -337,7 +338,8 @@ Assets/
 │   │   ├── TurretStore.cs
 │   │   ├── ProjectileStore.cs
 │   │   ├── EconomyStore.cs
-│   │   └── TurretSelectionStore.cs
+│   │   ├── TurretSelectionStore.cs
+│   │   └── WaveStore.cs
 │   ├── SimData/                  # Pure simulation data classes/structs
 │   │   ├── CreepSimData.cs
 │   │   ├── TurretSimData.cs
@@ -348,6 +350,7 @@ Assets/
 │   │   ├── CreepType.cs
 │   │   └── CreepTypeStats.cs
 │   ├── Systems/                  # IGameSystem implementations
+│   │   ├── WaveSystem.cs
 │   │   ├── SpawnSystem.cs
 │   │   ├── MovementSystem.cs
 │   │   ├── PlacementSystem.cs
@@ -371,15 +374,17 @@ Assets/
 │   │   ├── BaseHealthHud.uss
 │   │   ├── BaseHealthHud.uxml
 │   │   └── DefaultPanel Settings.asset
-│   ├── Data/                     # ScriptableObject definitions
-│   │   ├── CreepTypeDefinition.cs
-│   │   ├── CreepDefinitions.cs
-│   │   ├── SpawnConfig.cs
-│   │   ├── BaseConfig.cs
-│   │   ├── TurretTypeDefinition.cs
-│   │   ├── TurretDefinitions.cs
-│   │   └── EconomyConfig.cs
-│   └── Waves/                    # (Story 9)
+│   └── Data/                     # ScriptableObject definitions
+│       ├── CreepTypeDefinition.cs
+│       ├── CreepDefinitions.cs
+│       ├── SpawnConfig.cs         # (retired — replaced by WaveConfig)
+│       ├── BaseConfig.cs
+│       ├── TurretTypeDefinition.cs
+│       ├── TurretDefinitions.cs
+│       ├── EconomyConfig.cs
+│       ├── WaveEntryDefinition.cs
+│       ├── WaveDefinition.cs
+│       └── WaveConfig.cs
 ├── Tests/
 │   ├── Editor/
 │   │   ├── EditModeTests.asmdef
@@ -410,7 +415,11 @@ Assets/
 │   │   ├── TurretTypesIntegrationTests.cs
 │   │   ├── TurretTypeDirectoryBuilderTests.cs
 │   │   ├── CreepTypeDirectoryBuilderTests.cs
-│   │   └── CreepVarietyIntegrationTests.cs
+│   │   ├── CreepVarietyIntegrationTests.cs
+│   │   ├── WaveStoreTests.cs
+│   │   ├── WaveSystemTests.cs
+│   │   ├── WinStateTests.cs
+│   │   └── WaveIntegrationTests.cs
 │   └── Runtime/
 │       └── RuntimeTests.asmdef
 ├── Prefabs/
@@ -1408,11 +1417,13 @@ classDiagram
 
     class SpawnSystem {
         -CreepStore creepStore
+        -WaveStore waveStore
         -Vector3[] spawnPositions
-        -float spawnInterval
-        -int creepsPerSpawn
-        -CreepTypeStats[] orderedStats
-        -int currentTypeIndex
+        -Vector3 basePosition
+        -IReadOnlyDictionary~CreepType, CreepTypeStats~ statsByType
+        -List~CreepType~ consumeBuffer
+        -int nextCreepId
+        -int currentSpawnIndex
         +Tick(float deltaTime)
         +Reset()
     }
@@ -1439,7 +1450,8 @@ classDiagram
     GameFlowController --> CreepTypeDirectoryBuilder : TryBuild(definitions.Entries)
     CreepTypeDirectoryBuilder --> CreepTypeDirectory : builds via out parameter
     CreepTypeDirectory --> CreepTypeStats : contains statsByType, orderedStats
-    SpawnSystem --> CreepTypeStats : cycles round-robin per creep
+    SpawnSystem --> WaveStore : reads SpawnQueue via ConsumeSpawnQueue()
+    SpawnSystem --> CreepTypeStats : looks up stats by type
     SpawnSystem --> CreepSimData : sets Type at creation
     PresentationAdapter --> CreepSimData : reads Type for pool selection
     PresentationAdapter --> CreepTypeDirectory : uses PrefabsByType for pool creation
@@ -1447,9 +1459,243 @@ classDiagram
 
 **Notes:**
 - Mirrors the turret type data-driven pattern from Story 7. `CreepDefinitions` SO + `CreepTypeDirectoryBuilder` + `CreepTypeDirectory` parallel the turret equivalents.
-- `SpawnSystem` constructor changed from individual stats (`float creepSpeed`, `int damageToBase`, etc.) to `CreepTypeStats[] orderedStats`. Cycles `currentTypeIndex` per creep (not per burst), wrapping round-robin.
+- `SpawnSystem` is a queue consumer (refactored in Story 9). It reads `CreepType` requests from `WaveStore.SpawnQueue` via `ConsumeSpawnQueue()`, looks up stats from `IReadOnlyDictionary<CreepType, CreepTypeStats>`, assigns spawn positions round-robin, and creates `CreepSimData` in `CreepStore`.
 - `CreepSimData.Type` is write-once by `SpawnSystem` at creation. `PresentationAdapter` reads it for per-type pool selection.
 - `PresentationAdapter` manages creep pools via `IReadOnlyDictionary<CreepType, GameObjectPool> creepPoolByType` (mirrors turret pool pattern). Uses `CreepVisual` struct dictionary (mirrors `TurretVisual`) to track each creep's source pool for correct return-to-pool on removal.
-- `CreepTypeDirectory` has no `DefaultType` (unlike `TurretTypeDirectory`). All types participate equally in round-robin cycling.
+- `CreepTypeDirectory` has no `DefaultType` (unlike `TurretTypeDirectory`).
 - Pool budget is split across types (`CeilToInt(total / typeCount)`) — not multiplied.
 - Adding a new creep type requires: enum value + definitions entry + prefab — zero system/presentation code changes.
+
+---
+
+## Story 9 — Wave System
+
+### Class Diagram
+
+```mermaid
+classDiagram
+    class WaveConfig {
+        <<ScriptableObject>>
+        -WaveDefinition[] waves
+        +WaveDefinition[] Waves
+        +OnValidate()
+    }
+
+    class WaveDefinition {
+        <<struct>>
+        -WaveEntryDefinition[] entries
+        -float delayBeforeStart
+        +WaveEntryDefinition[] Entries
+        +float DelayBeforeStart
+        +Validate()
+    }
+
+    class WaveEntryDefinition {
+        <<struct>>
+        -CreepType creepType
+        -int count
+        -float spawnInterval
+        +CreepType CreepType
+        +int Count
+        +float SpawnInterval
+        +Validate()
+    }
+
+    class WaveStore {
+        -List~CreepType~ spawnQueue
+        -int currentWaveIndex
+        -bool allWavesCleared
+        -bool waveActive
+        +IReadOnlyList~CreepType~ SpawnQueue
+        +int CurrentWaveIndex
+        +bool AllWavesCleared
+        +bool WaveActive
+        +event Action~int~ OnWaveStarted
+        +event Action~int~ OnWaveCleared
+        +EnqueueSpawn(CreepType)
+        +ConsumeSpawnQueue(List~CreepType~ dest)
+        +StartWave(int waveIndex)
+        +ClearWave(int waveIndex)
+        +MarkAllWavesCleared()
+        +BeginFrame()
+        +Reset()
+    }
+
+    class WaveSystem {
+        -WaveStore waveStore
+        -CreepStore creepStore
+        -WaveDefinition[] waves
+        -Phase phase
+        -int currentWaveIdx
+        -int currentEntryIdx
+        -int creepsSpawnedInEntry
+        -float spawnTimer
+        -float delayTimer
+        +Tick(float deltaTime)
+        +Reset()
+    }
+
+    class SpawnSystem {
+        -CreepStore creepStore
+        -WaveStore waveStore
+        -Vector3[] spawnPositions
+        -Vector3 basePosition
+        -IReadOnlyDictionary~CreepType, CreepTypeStats~ statsByType
+        -int nextCreepId
+        -int currentSpawnIndex
+        +Tick(float deltaTime)
+        +Reset()
+    }
+
+    class PlayingState {
+        -Action~GameTrigger~ fire
+        -BaseStore baseStore
+        -WaveStore waveStore
+        -bool baseDestroyedFired
+        -bool allWavesClearedFired
+        +Enter()
+        +Tick(float deltaTime)
+        +Exit()
+    }
+
+    class WinState {
+        -Action~GameTrigger~ fire
+        +Enter()
+        +Tick(float deltaTime)
+        +Exit()
+    }
+
+    GameSession --> WaveStore : owns
+    WaveConfig --> "1..*" WaveDefinition : contains
+    WaveDefinition --> "0..*" WaveEntryDefinition : contains
+    WaveSystem --> WaveStore : writes (enqueue, start/clear wave, allWavesCleared)
+    WaveSystem --> CreepStore : reads ActiveCreeps.Count
+    WaveSystem --> WaveDefinition : reads wave data
+    WaveSystem ..|> IGameSystem
+    SpawnSystem --> WaveStore : reads via ConsumeSpawnQueue()
+    SpawnSystem --> CreepStore : writes via Add()
+    SpawnSystem ..|> IGameSystem
+    PlayingState --> BaseStore : reads IsDestroyed
+    PlayingState --> WaveStore : reads AllWavesCleared
+    PlayingState ..|> IGameState
+    WinState ..|> IGameState
+    GameFlowController --> WaveConfig : serialized ref
+    GameUiCoordinator ..> WinState : shows WinPopup on enter
+```
+
+**Notes:**
+- `WaveSystem` is the single writer for `WaveStore`. Readers: `SpawnSystem` (spawn queue), `PlayingState` (AllWavesCleared).
+- `WaveSystem` is scene-independent — it only enqueues `CreepType` values into `WaveStore.SpawnQueue`. `SpawnSystem` owns spawn position assignment (round-robin over scene spawn points). Wave definitions are reusable across different scene layouts.
+- `WaveDefinition.count` = total creeps per entry, NOT per spawn point.
+- Wave-cleared condition: `SpawnQueue.Count == 0 && ActiveCreeps.Count == 0`. Simple; no per-wave creep tracking needed since one wave is active at a time.
+- `PlayingState` polls both `BaseStore.IsDestroyed` and `WaveStore.AllWavesCleared`. Lose takes priority over win (BaseDestroyed checked first). One-shot guards prevent double-firing. Once either fires, subsequent ticks are no-ops.
+- `WinState` mirrors `LoseState` — empty shell. `GameUiCoordinator.OnStateChanged` instantiates WinPopup on enter, destroys on exit.
+- `WaveConfig` replaces `SpawnConfig` as the serialized reference in `GameFlowController`. `SpawnConfig` is retired.
+- Internal phase enum in `WaveSystem`: `WaitingToStart` → `Spawning` → `WaitingForClear` → (next wave or `Done`). `MAX_SPAWNS_PER_TICK = 20` burst cap prevents hitching on large deltaTime spikes.
+- Time carry-over: when `WaitingToStart` delay elapses mid-tick, only the excess time after the delay flows into the `Spawning` phase via return value pattern.
+
+### Wave Progression Sequence
+
+```mermaid
+sequenceDiagram
+    participant Bootstrap as GameFlowController
+    participant Session as GameSession
+    participant SM as GameStateMachine
+    participant Playing as PlayingState
+    participant WaveS as WaveSystem
+    participant WStore as WaveStore
+    participant Spawn as SpawnSystem
+    participant CStore as CreepStore
+    participant Move as MovementSystem
+    participant Dmg as DamageSystem
+    participant Coord as GameUiCoordinator
+
+    Note over Bootstrap: Frame 1 — wave delay counting down
+
+    Bootstrap->>Session: BeginFrame()
+    Session->>WStore: BeginFrame()
+
+    Bootstrap->>SM: Tick(dt)
+    SM->>Playing: Tick(dt)
+    Note over Playing: AllWavesCleared? → false
+
+    Bootstrap->>WaveS: Tick(dt)
+    Note over WaveS: Phase=WaitingToStart, delayTimer -= dt
+    Note over WaveS: delayTimer > 0 → no spawns
+
+    Note over Bootstrap: Frame K — delay elapsed, spawning begins
+
+    Bootstrap->>Session: BeginFrame()
+    Bootstrap->>SM: Tick(dt)
+    SM->>Playing: Tick(dt)
+
+    Bootstrap->>WaveS: Tick(dt)
+    Note over WaveS: delayTimer ≤ 0 → StartCurrentWave()
+    WaveS->>WStore: StartWave(0)
+    WStore-->>WStore: OnWaveStarted?.Invoke(0)
+    Note over WaveS: Phase=Spawning
+    WaveS->>WStore: EnqueueSpawn(entry.CreepType)
+    Note over WaveS: spawnTimer cadence controls rate
+
+    Bootstrap->>Spawn: Tick(dt)
+    Spawn->>WStore: ConsumeSpawnQueue(buffer)
+    Note over Spawn: Look up stats, assign position round-robin
+    Spawn->>CStore: Add(creepSimData)
+
+    Note over Bootstrap: Frames K+1..N — spawning + creeps moving
+
+    loop Each spawn frame
+        Bootstrap->>WaveS: Tick(dt)
+        Note over WaveS: Enqueue more creeps per entry cadence
+        Bootstrap->>Spawn: Tick(dt)
+        Note over Spawn: Consume queue, create creeps
+        Bootstrap->>Move: Tick(dt)
+        Note over Move: Advance creeps toward base
+    end
+
+    Note over Bootstrap: Frame N+1 — all entry creeps spawned
+
+    Bootstrap->>WaveS: Tick(dt)
+    Note over WaveS: Entry exhausted → Phase=WaitingForClear
+
+    Note over Bootstrap: Frame M — last creep killed or arrived
+
+    Bootstrap->>Session: BeginFrame()
+    Note over CStore: Flush removals → ActiveCreeps empty
+
+    Bootstrap->>WaveS: Tick(dt)
+    Note over WaveS: SpawnQueue==0 && ActiveCreeps==0
+    WaveS->>WStore: ClearWave(0)
+    WStore-->>WStore: OnWaveCleared?.Invoke(0)
+
+    alt More waves exist
+        Note over WaveS: Phase=WaitingToStart (next wave delay)
+    else Last wave
+        WaveS->>WStore: MarkAllWavesCleared()
+        Note over WaveS: Phase=Done
+    end
+
+    Note over Bootstrap: Frame M+1 — PlayingState detects win
+
+    Bootstrap->>SM: Tick(dt)
+    SM->>Playing: Tick(dt)
+    Note over Playing: AllWavesCleared? → true
+    Playing->>SM: Fire(AllWavesCleared)
+
+    Note over Bootstrap: Frame M+2 — transition to Win
+
+    Bootstrap->>SM: Tick(dt)
+    Note over SM: Resolve (Playing, AllWavesCleared) → Win
+    SM->>Playing: Exit()
+    SM-->>SM: Switch to WinState
+    SM-->>Bootstrap: OnStateChanged(Playing, Win)
+    Coord-->>Coord: Instantiate WinPopup
+    Note over Bootstrap: Systems no longer tick (gated by Playing state)
+```
+
+**Key timing:**
+- **Frame K**: `WaveSystem.Tick()` delay elapses, `StartWave()` fires `OnWaveStarted`, first spawn enqueued. `SpawnSystem.Tick()` consumes queue and creates creep.
+- **Frame M**: After `BeginFrame()` flushes last creep removal, `WaveSystem.Tick()` detects `SpawnQueue.Count == 0 && ActiveCreeps.Count == 0`. Calls `ClearWave()` / `MarkAllWavesCleared()`. `PlayingState` has already ticked this frame (before systems), so it sees `AllWavesCleared` next frame.
+- **Frame M+1**: `PlayingState.Tick()` detects `AllWavesCleared`, fires `AllWavesCleared` trigger (pending).
+- **Frame M+2**: State machine resolves trigger, transitions to `Win`. `GameUiCoordinator` shows WinPopup. Systems stop ticking.
+- This mirrors the `BaseDestroyed` detection timing: the condition is set by a system during Phase 1, `PlayingState` sees it one frame later.

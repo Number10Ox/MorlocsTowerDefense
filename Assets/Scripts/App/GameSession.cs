@@ -7,6 +7,7 @@ public class GameSession
     public ProjectileStore ProjectileStore { get; }
     public EconomyStore EconomyStore { get; }
     public TurretSelectionStore TurretSelectionStore { get; }
+    public WaveStore WaveStore { get; }
 
     public GameSession(int baseMaxHealth, int startingCoins, TurretType defaultTurretType)
     {
@@ -16,6 +17,7 @@ public class GameSession
         ProjectileStore = new ProjectileStore();
         EconomyStore = new EconomyStore(startingCoins);
         TurretSelectionStore = new TurretSelectionStore(defaultTurretType);
+        WaveStore = new WaveStore();
     }
 
     public void BeginFrame()
@@ -25,6 +27,7 @@ public class GameSession
         TurretStore.BeginFrame();
         ProjectileStore.BeginFrame();
         EconomyStore.BeginFrame();
+        WaveStore.BeginFrame();
     }
 
     public void Reset()
@@ -35,5 +38,6 @@ public class GameSession
         ProjectileStore.Reset();
         EconomyStore.Reset();
         TurretSelectionStore.Reset();
+        WaveStore.Reset();
     }
 }

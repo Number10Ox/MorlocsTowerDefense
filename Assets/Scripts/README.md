@@ -43,3 +43,6 @@ Every piece of simulation data has exactly one system that writes it. No excepti
 | `ProjectileSimData.Position` | `ProjectileSystem` | `PresentationAdapter` |
 | `ProjectileStore.HitsThisFrame` | `ProjectileSystem` | `DamageSystem` |
 | `PlacementInput` | `PresentationAdapter` | `PlacementSystem` |
+| `WaveStore.SpawnQueue` | `WaveSystem` | `SpawnSystem` |
+| `WaveStore.AllWavesCleared` | `WaveSystem` | `PlayingState` |
+| `WaveStore.CurrentWaveIndex` | `WaveSystem` | `PresentationAdapter` |

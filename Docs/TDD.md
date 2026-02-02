@@ -47,14 +47,15 @@ GameFlowController.Update() → GameStateMachine.Tick() → GameSession.BeginFra
 | Class | Type | Responsibility |
 |-------|------|---------------|
 | `GameFlowController` | MonoBehaviour | Composition root. Creates GameSession, state machine, states, system scheduler, systems, and presentation adapter. Configures transition table. Drives game loop via `Update()`. Gates system ticking by current state. Calls `GameSession.BeginFrame()` before system tick. |
-| `GameUiCoordinator` | Plain C# | State-driven presentation decisions: popup lifecycle, HUD visibility, health/coin/turret-selection event forwarding. Subscribes to `GameStateMachine.OnStateChanged`, `BaseStore.OnBaseHealthChanged`, `EconomyStore.OnCoinsChanged`, and `TurretSelectionStore.OnSelectionChanged`. No simulation writes. Constructed by `GameFlowController`, torn down in `OnDestroy`. |
-| `GameSession` | Plain C# | Per-run session. Owns all stores (CreepStore, BaseStore, TurretStore, ProjectileStore, EconomyStore, TurretSelectionStore). Constructor takes `defaultTurretType` for `TurretSelectionStore`. `BeginFrame()` flushes deferred store operations and clears per-frame change lists. `Reset()` resets all stores for game restart. Discarded and recreated on restart. |
+| `GameUiCoordinator` | Plain C# | State-driven presentation decisions: popup lifecycle (LosePopup on Lose, WinPopup on Win), HUD visibility, health/coin/turret-selection event forwarding. Subscribes to `GameStateMachine.OnStateChanged`, `BaseStore.OnBaseHealthChanged`, `EconomyStore.OnCoinsChanged`, and `TurretSelectionStore.OnSelectionChanged`. No simulation writes. Constructed by `GameFlowController`, torn down in `OnDestroy`. |
+| `GameSession` | Plain C# | Per-run session. Owns all stores (CreepStore, BaseStore, TurretStore, ProjectileStore, EconomyStore, TurretSelectionStore, WaveStore). Constructor takes `defaultTurretType` for `TurretSelectionStore`. `BeginFrame()` flushes deferred store operations and clears per-frame change lists. `Reset()` resets all stores for game restart. Discarded and recreated on restart. |
 | `GameStateMachine` | Plain C# | Owns state registry and transition table. Resolves triggers to transitions. Fires `OnStateChanged` event. Processes pending triggers at tick start. |
 | `GameState` | Enum | State identifiers: `Init`, `Playing`, `Win`, `Lose`. |
 | `GameTrigger` | Enum | Semantic transition triggers: `SceneValidated`, `BaseDestroyed`, `AllWavesCleared`, `RestartRequested`. |
 | `IGameState` | Interface | Contract for game states: `Enter()`, `Tick(float)`, `Exit()`. |
 | `InitState` | Plain C# : `IGameState` | Validates scene setup (Base, SpawnPoints). Fires `SceneValidated`. Future: async Addressable loading. |
-| `PlayingState` | Plain C# : `IGameState` | Manages gameplay flow. Polls `BaseStore.IsDestroyed` in `Tick()` and fires `BaseDestroyed` once (guarded by `baseDestroyedFired` flag, reset on `Enter()`). Future: checks `AllWavesCleared`. Does not own or tick systems. |
+| `PlayingState` | Plain C# : `IGameState` | Manages gameplay flow. Polls end conditions each tick with one-shot guards (reset on `Enter()`). Priority: `BaseStore.IsDestroyed` (lose) checked first → fires `BaseDestroyed`; then `WaveStore.AllWavesCleared` (win) → fires `AllWavesCleared`. Once either trigger fires, all subsequent ticks are no-ops. Does not own or tick systems. |
+| `WinState` | Plain C# : `IGameState` | Represents win game state. Empty Enter/Tick/Exit — popup toggle handled by `GameUiCoordinator` as presentation. Future: `RestartRequested` trigger (Story 10). |
 | `LoseState` | Plain C# : `IGameState` | Represents lose game state. Empty Enter/Tick/Exit — popup toggle handled by `GameUiCoordinator` as presentation. Future: `RestartRequested` trigger (Story 10). |
 | `SystemScheduler` | Plain C# | Owns the ordered `IGameSystem[]` array. Ticks systems sequentially. Owned by `GameFlowController`, ticked when state machine is in gameplay states. |
 | `IGameSystem` | Interface | Contract for gameplay systems: `Tick(float)`. |
@@ -64,7 +65,9 @@ GameFlowController.Update() → GameStateMachine.Tick() → GameSession.BeginFra
 | `CreepDefinitions` | ScriptableObject | Inspector-editable table of creep definitions (`[CreateAssetMenu(fileName = "CreepDefinitions", menuName = "Game/Creep Definitions")]`). Contains `CreepTypeDefinition[]` entries where order determines round-robin spawn cycling. `OnValidate()` sanitizes entries via `Validate()` — no duplicate-type detection (builder is runtime authority). |
 | `CreepTypeDirectoryBuilder` | Static helper | Pure C# builder. `TryBuild(CreepTypeDefinition[], out CreepTypeDirectory, out string)` locally copies and validates each entry, builds the immutable `CreepTypeDirectory` result object. Fail-fast on null prefabs or duplicate types with index+type in error messages. Mirrors `TurretTypeDirectoryBuilder`. |
 | `CreepTypeDirectory` | Plain C# (immutable) | Immutable result object built by `CreepTypeDirectoryBuilder.TryBuild()`. Properties: `OrderedTypes`, `OrderedStats`, `StatsByType`, `PrefabsByType`. No `DefaultType` (unlike turret — creeps cycle through all types). |
-| `SpawnSystem` | Plain C# : `IGameSystem` | Spawn timer. Creates `CreepSimData` entries via `CreepStore.Add()`. Cycles through creep types round-robin per creep using `CreepTypeStats[]` from `CreepTypeDirectory`. Depends on `CreepStore`, not on other systems. |
+| `WaveStore` | Plain C# | Authoritative owner of wave progress state. Writer: `WaveSystem`. Readers: `SpawnSystem`, `PlayingState`. State: `SpawnQueue` (List&lt;CreepType&gt;), `CurrentWaveIndex`, `AllWavesCleared`, `WaveActive`. Methods: `EnqueueSpawn(CreepType)`, `ConsumeSpawnQueue(List<CreepType>)`, `StartWave(int)`, `ClearWave(int)`, `MarkAllWavesCleared()`, `BeginFrame()`, `Reset()`. Events: `OnWaveStarted(int)`, `OnWaveCleared(int)`. |
+| `WaveSystem` | Plain C# : `IGameSystem` | Wave progression system. Ticks first in Phase 1 (before SpawnSystem). Drives wave timing based on `WaveDefinition[]` data. Enqueues `CreepType` spawn requests into `WaveStore.SpawnQueue`. Detects wave-cleared via `SpawnQueue.Count == 0 && CreepStore.ActiveCreeps.Count == 0`. Internal phases: WaitingToStart → Spawning → WaitingForClear → Done. Scene-independent — only enqueues types, never assigns positions. Burst cap (MAX_SPAWNS_PER_TICK=20) prevents hitching on large deltaTime spikes. |
+| `SpawnSystem` | Plain C# : `IGameSystem` | Queue-driven creep spawner. Consumes `CreepType` requests from `WaveStore.SpawnQueue`, looks up stats from `IReadOnlyDictionary<CreepType, CreepTypeStats>`, assigns spawn positions round-robin over `Vector3[] spawnPositions`, and creates `CreepSimData` in `CreepStore`. Scene-specific — owns spawn position assignment. |
 | `MovementSystem` | Plain C# : `IGameSystem` | Advances creep positions toward base. Detects arrival, sets `ReachedBase = true`, and calls `CreepStore.MarkForRemoval()`. Depends on `CreepStore`, not on other systems. |
 | `DamageSystem` | Plain C# : `IGameSystem` | Three-phase damage processing. `TickSlowEffects(dt)`: decrements `SlowRemainingTime` on all alive creeps, clamps to zero. `ProcessProjectileHits()`: reads `ProjectileStore.HitsThisFrame`, applies damage to creeps (clamped to 0), marks dead creeps for removal, fires `OnCreepKilled(creepId, coinReward)` event; if creep survives and hit carries `SlowDuration > 0`, applies slow effect (`SlowRemainingTime = hit.SlowDuration, SlowMultiplier = hit.SlowMultiplier`). `ProcessBaseDamage()`: iterates `ActiveCreeps`, applies `BaseStore.ApplyDamage()` for each with `ReachedBase && !HasDealtBaseDamage && Health > 0`, sets `HasDealtBaseDamage = true`. Dead-creep guard prevents killed creeps from dealing base damage. |
 | `ProjectileSystem` | Plain C# : `IGameSystem` | Turret firing (with inline target selection), projectile movement, and hit detection. `UpdateFireTimers()`: decrements cooldowns, finds nearest alive creep in range via sqrMagnitude scan, spawns homing projectile. `MoveProjectiles()`: advances projectiles toward target, records hits via `ProjectileStore.RecordHit()`, discards projectiles whose target is dead/removed. |
@@ -180,7 +183,7 @@ Stores themselves provide lifecycle operations (`Add`, `MarkForRemoval`, `BeginF
 | Creep positions | CreepStore (field: Position) | MovementSystem | TargetingSystem, DamageSystem, PresentationAdapter |
 | Creep arrival flag | CreepStore (field: ReachedBase) | MovementSystem | MovementSystem (skip check), DamageSystem |
 | Creep base damage guard | CreepStore (field: HasDealtBaseDamage) | DamageSystem | DamageSystem |
-| Creep spawn queue | (Future: WaveStore) | WaveSystem | SpawnSystem |
+| Creep spawn queue | WaveStore (field: SpawnQueue) | WaveSystem | SpawnSystem |
 | Creep positions & velocity | CreepStore (field: Position) | MovementSystem | TargetingSystem, DamageSystem, PresentationAdapter |
 | Creep health | CreepStore (field: Health) | DamageSystem | ProjectileSystem, MovementSystem, PresentationAdapter |
 | Creep max health | CreepStore (field: MaxHealth) | SpawnSystem (at creation) | PresentationAdapter |
@@ -196,7 +199,7 @@ Stores themselves provide lifecycle operations (`Add`, `MarkForRemoval`, `BeginF
 | Creep coin reward | CreepStore (field: CoinReward) | SpawnSystem (at creation) | DamageSystem (passes through OnCreepKilled event) |
 | Base health | BaseStore (field: CurrentHealth) | DamageSystem | PlayingState (end condition), BaseHealthHud |
 | Coin balance | EconomyStore (field: CurrentCoins) | EconomySystem | PlacementSystem (affordability via CanAfford), CoinHud (via OnCoinsChanged) |
-| Wave progress | (Future: WaveStore) | WaveSystem | PlayingState (end condition), PresentationAdapter |
+| Wave progress (current index, active, all-cleared) | WaveStore | WaveSystem | PlayingState (end condition), PresentationAdapter |
 | Player input (placement) | PlacementInput | PresentationAdapter (CollectInput) | PlacementSystem |
 | Selected turret type | TurretSelectionStore (field: SelectedType) | PresentationAdapter (CollectInput, keyboard) | PlacementSystem, GameUiCoordinator |
 | Creep slow remaining time | CreepStore (field: SlowRemainingTime) | DamageSystem | MovementSystem |
@@ -237,15 +240,14 @@ Assets/Scripts/
 │   ├── StateMachine/       # GameStateMachine, IGameState
 │   ├── Scheduling/         # SystemScheduler, IGameSystem
 │   └── Pooling/            # GameObjectPool, IPoolable (namespace: ObjectPooling)
-├── States/                 # InitState, PlayingState, LoseState
-├── Stores/                 # CreepStore, BaseStore, TurretStore, ProjectileStore, EconomyStore, TurretSelectionStore
+├── States/                 # InitState, PlayingState, WinState, LoseState
+├── Stores/                 # CreepStore, BaseStore, TurretStore, ProjectileStore, EconomyStore, TurretSelectionStore, WaveStore
 ├── SimData/                # CreepSimData, TurretSimData, ProjectileSimData, ProjectileHit, TurretType, TurretTypeStats, CreepType, CreepTypeStats
-├── Systems/                # SpawnSystem, MovementSystem, PlacementSystem, ProjectileSystem, DamageSystem, EconomySystem
+├── Systems/                # WaveSystem, SpawnSystem, MovementSystem, PlacementSystem, ProjectileSystem, DamageSystem, EconomySystem
 ├── Components/             # SpawnPointComponent, HomeBaseComponent, CreepComponent, TurretComponent, ProjectileComponent
 ├── Input/                  # PlacementInput
 ├── Presentation/           # PresentationAdapter, GameUiCoordinator, BaseHealthHud, CoinHud, TurretSelectionHud (.cs + UI Toolkit assets)
-├── Data/                   # ScriptableObject definitions (CreepTypeDefinition, CreepDefinitions, SpawnConfig, BaseConfig, TurretTypeDefinition, TurretDefinitions, EconomyConfig)
-└── Waves/                  # (Story 9)
+└── Data/                   # ScriptableObject definitions (CreepTypeDefinition, CreepDefinitions, SpawnConfig, BaseConfig, TurretTypeDefinition, TurretDefinitions, EconomyConfig, WaveEntryDefinition, WaveDefinition, WaveConfig)
 ```
 
 No project-wide namespace. Role-based folders group classes by architectural role. Generic reusable infrastructure (`ObjectPooling`) gets its own namespace.
@@ -307,17 +309,14 @@ The spec emphasizes making gameplay values "easy to tweak and tune." All gamepla
 |----------|--------|---------|-------|
 | `CreepTypeDefinition` | `CreepType creepType`, `GameObject prefab`, `float speed`, `int damageToBase`, `int maxHealth`, `int coinReward` | `[Serializable]` struct — per-creep-type definition. Entries live in `CreepDefinitions.entries[]`. `Validate()` clamps fields to valid ranges. | 8 |
 | `CreepDefinitions` | `CreepTypeDefinition[] entries` | ScriptableObject containing the ordered creep definitions table. Order determines round-robin spawn cycling. `OnValidate()` clamps ranges only — builder is runtime validation authority. | 8 |
-| `SpawnConfig` | `float spawnInterval`, `int creepsPerSpawn` | Spawn timing. Temporary driver until WaveSystem (Story 9) takes over. | 2 |
+| `SpawnConfig` | `float spawnInterval`, `int creepsPerSpawn` | Spawn timing. Retired in Story 9 — replaced by `WaveConfig`. | 2 |
 | `BaseConfig` | `int maxHealth` | Base health tuning. | 3 |
 | `TurretTypeDefinition` | `TurretType turretType`, `GameObject prefab`, `int damage`, `float range`, `float fireInterval`, `float projectileSpeed`, `int cost`, `float slowDuration`, `float slowMultiplier` | `[Serializable]` struct — per-turret-type definition. Entries live in `TurretDefinitions.entries[]`. `Validate()` clamps fields to valid ranges (mutates in place — caller must reassign for struct copy semantics). | 5-7 |
 | `TurretDefinitions` | `TurretTypeDefinition[] entries` | ScriptableObject containing the ordered turret definitions table. First entry = default type. Order determines keyboard shortcuts (1-9) and HUD layout. `OnValidate()` detects duplicate `TurretType` entries. Single asset replaces per-type `TurretTypeDefinition` SOs. | 7 |
 | `EconomyConfig` | `int startingCoins` | Global economy tuning. | 6 |
-
-### Planned ScriptableObjects (not yet implemented)
-
-| SO Class | Expected Fields | Purpose | Story |
-|----------|----------------|---------|-------|
-| `WaveDef` | creep types, counts, intervals, delay | Per-wave spawn schedule | 9 |
+| `WaveEntryDefinition` | `CreepType creepType`, `int count`, `float spawnInterval` | `[Serializable]` struct — per-entry within a wave. `count` = total creeps (scene-independent). `Validate()` clamps to valid ranges. | 9 |
+| `WaveDefinition` | `WaveEntryDefinition[] entries`, `float delayBeforeStart` | `[Serializable]` struct — per-wave definition. Entries spawn sequentially. `Validate()` clamps delay and delegates to entries. | 9 |
+| `WaveConfig` | `WaveDefinition[] waves` | ScriptableObject containing ordered wave definitions. Array order = wave progression sequence. Consumed at bootstrap by `WaveSystem`. | 9 |
 
 ### Asset Loading
 

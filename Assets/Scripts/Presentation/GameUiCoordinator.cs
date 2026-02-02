@@ -13,8 +13,10 @@ public class GameUiCoordinator
     private CoinHud coinHud;
     private TurretSelectionHud turretSelectionHud;
     private readonly GameObject losePopupPrefab;
+    private readonly GameObject winPopupPrefab;
     private readonly Transform popupParent;
     private GameObject losePopupInstance;
+    private GameObject winPopupInstance;
     private bool tornDown;
 
     public GameUiCoordinator(
@@ -26,6 +28,7 @@ public class GameUiCoordinator
         CoinHud coinHud,
         TurretSelectionHud turretSelectionHud,
         GameObject losePopupPrefab,
+        GameObject winPopupPrefab,
         Transform popupParent)
     {
         this.stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
@@ -36,6 +39,7 @@ public class GameUiCoordinator
         this.coinHud = coinHud;
         this.turretSelectionHud = turretSelectionHud;
         this.losePopupPrefab = losePopupPrefab;
+        this.winPopupPrefab = winPopupPrefab;
         this.popupParent = popupParent;
 
         stateMachine.OnStateChanged += OnStateChanged;
@@ -121,6 +125,12 @@ public class GameUiCoordinator
             UnityEngine.Object.Destroy(losePopupInstance);
             losePopupInstance = null;
         }
+
+        if (winPopupInstance != null)
+        {
+            UnityEngine.Object.Destroy(winPopupInstance);
+            winPopupInstance = null;
+        }
     }
 
     private void OnStateChanged(GameState from, GameState to)
@@ -138,6 +148,19 @@ public class GameUiCoordinator
         {
             UnityEngine.Object.Destroy(losePopupInstance);
             losePopupInstance = null;
+        }
+
+        if (to == GameState.Win && winPopupPrefab != null)
+        {
+            winPopupInstance = popupParent != null
+                ? UnityEngine.Object.Instantiate(winPopupPrefab, popupParent)
+                : UnityEngine.Object.Instantiate(winPopupPrefab);
+        }
+
+        if (from == GameState.Win && winPopupInstance != null)
+        {
+            UnityEngine.Object.Destroy(winPopupInstance);
+            winPopupInstance = null;
         }
 
         bool isPlaying = to == GameState.Playing;

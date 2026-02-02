@@ -1,37 +1,33 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
-// Timer-driven creep spawner. Creates CreepSimData in CreepStore each burst interval.
-// Cycles through creep types round-robin per creep using orderedStats from CreepTypeDirectory.
+// Queue-driven creep spawner. Consumes CreepType requests from WaveStore.SpawnQueue,
+// looks up stats, assigns spawn positions round-robin, and creates CreepSimData in CreepStore.
 public class SpawnSystem : IGameSystem
 {
-    private const int MAX_BURSTS_PER_TICK = 5;
-
     private readonly CreepStore creepStore;
+    private readonly WaveStore waveStore;
     private readonly Vector3[] spawnPositions;
     private readonly Vector3 basePosition;
-    private readonly float spawnInterval;
-    private readonly int creepsPerSpawn;
-    private readonly CreepTypeStats[] orderedStats;
+    private readonly IReadOnlyDictionary<CreepType, CreepTypeStats> statsByType;
+    private readonly List<CreepType> consumeBuffer = new();
 
-    private float spawnTimer;
     private int nextCreepId;
-    private int currentTypeIndex;
+    private int currentSpawnIndex;
 
     public SpawnSystem(
         CreepStore creepStore,
+        WaveStore waveStore,
         Vector3[] spawnPositions,
         Vector3 basePosition,
-        float spawnInterval,
-        int creepsPerSpawn,
-        CreepTypeStats[] orderedStats)
+        IReadOnlyDictionary<CreepType, CreepTypeStats> statsByType)
     {
         this.creepStore = creepStore ?? throw new ArgumentNullException(nameof(creepStore));
+        this.waveStore = waveStore ?? throw new ArgumentNullException(nameof(waveStore));
         this.spawnPositions = spawnPositions ?? throw new ArgumentNullException(nameof(spawnPositions));
         this.basePosition = basePosition;
-        this.spawnInterval = spawnInterval;
-        this.creepsPerSpawn = creepsPerSpawn;
-        this.orderedStats = orderedStats ?? throw new ArgumentNullException(nameof(orderedStats));
+        this.statsByType = statsByType ?? throw new ArgumentNullException(nameof(statsByType));
     }
 
     public void Tick(float deltaTime)
@@ -41,66 +37,45 @@ public class SpawnSystem : IGameSystem
             return;
         }
 
-        if (spawnInterval <= 0f)
+        consumeBuffer.Clear();
+        waveStore.ConsumeSpawnQueue(consumeBuffer);
+
+        if (consumeBuffer.Count == 0)
         {
             return;
         }
 
-        if (creepsPerSpawn <= 0)
+        for (int i = 0; i < consumeBuffer.Count; i++)
         {
-            return;
-        }
+            CreepType type = consumeBuffer[i];
 
-        if (orderedStats.Length == 0)
-        {
-            return;
-        }
+            if (!statsByType.TryGetValue(type, out CreepTypeStats stats))
+            {
+                Debug.LogWarning($"SpawnSystem: No stats found for CreepType {type}. Skipping.");
+                continue;
+            }
 
-        spawnTimer += deltaTime;
+            Vector3 position = spawnPositions[currentSpawnIndex];
+            currentSpawnIndex = (currentSpawnIndex + 1) % spawnPositions.Length;
 
-        int bursts = 0;
-        while (spawnTimer >= spawnInterval && bursts < MAX_BURSTS_PER_TICK)
-        {
-            spawnTimer -= spawnInterval;
-            SpawnBurst();
-            bursts++;
-        }
-
-        // Clamp leftover timer to prevent unbounded accumulation after long stalls
-        if (spawnTimer > spawnInterval)
-        {
-            spawnTimer = spawnInterval;
+            var creep = new CreepSimData(nextCreepId++)
+            {
+                Type = stats.Type,
+                Position = position,
+                Target = basePosition,
+                Speed = stats.Speed,
+                DamageToBase = stats.DamageToBase,
+                Health = stats.MaxHealth,
+                MaxHealth = stats.MaxHealth,
+                CoinReward = stats.CoinReward
+            };
+            creepStore.Add(creep);
         }
     }
 
     public void Reset()
     {
-        spawnTimer = 0f;
         nextCreepId = 0;
-        currentTypeIndex = 0;
-    }
-
-    private void SpawnBurst()
-    {
-        for (int s = 0; s < spawnPositions.Length; s++)
-        {
-            for (int c = 0; c < creepsPerSpawn; c++)
-            {
-                CreepTypeStats stats = orderedStats[currentTypeIndex];
-                var creep = new CreepSimData(nextCreepId++)
-                {
-                    Type = stats.Type,
-                    Position = spawnPositions[s],
-                    Target = basePosition,
-                    Speed = stats.Speed,
-                    DamageToBase = stats.DamageToBase,
-                    Health = stats.MaxHealth,
-                    MaxHealth = stats.MaxHealth,
-                    CoinReward = stats.CoinReward
-                };
-                creepStore.Add(creep);
-                currentTypeIndex = (currentTypeIndex + 1) % orderedStats.Length;
-            }
-        }
+        currentSpawnIndex = 0;
     }
 }

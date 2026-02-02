@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -11,7 +12,6 @@ public class CreepVarietyIntegrationTests
     private const int BIG_DAMAGE_TO_BASE = 3;
     private const int SMALL_COIN_REWARD = 1;
     private const int BIG_COIN_REWARD = 3;
-    private const float SPAWN_INTERVAL = 1f;
     private const float ARRIVAL_THRESHOLD = 0.5f;
 
     private static readonly CreepTypeStats SmallStats = new CreepTypeStats(
@@ -20,9 +20,15 @@ public class CreepVarietyIntegrationTests
     private static readonly CreepTypeStats BigStats = new CreepTypeStats(
         CreepType.Big, BIG_SPEED, BIG_DAMAGE_TO_BASE, BIG_MAX_HEALTH, BIG_COIN_REWARD);
 
-    private static readonly CreepTypeStats[] TwoTypes = new CreepTypeStats[] { SmallStats, BigStats };
+    private static readonly IReadOnlyDictionary<CreepType, CreepTypeStats> StatsByType =
+        new Dictionary<CreepType, CreepTypeStats>
+        {
+            { CreepType.Small, SmallStats },
+            { CreepType.Big, BigStats }
+        };
 
     private CreepStore creepStore;
+    private WaveStore waveStore;
     private Vector3[] singleSpawnPoint;
     private Vector3 basePosition;
 
@@ -30,60 +36,60 @@ public class CreepVarietyIntegrationTests
     public void SetUp()
     {
         creepStore = new CreepStore();
+        waveStore = new WaveStore();
         singleSpawnPoint = new[] { new Vector3(10f, 0f, 0f) };
         basePosition = Vector3.zero;
     }
 
-    private SpawnSystem MakeSpawnSystem(
-        CreepTypeStats[] orderedStats = null,
-        int perSpawn = 1)
+    private SpawnSystem MakeSpawnSystem(Vector3[] spawnPositions = null)
     {
         return new SpawnSystem(
             creepStore,
-            singleSpawnPoint,
+            waveStore,
+            spawnPositions ?? singleSpawnPoint,
             basePosition,
-            SPAWN_INTERVAL,
-            perSpawn,
-            orderedStats ?? TwoTypes);
+            StatsByType);
     }
 
-    // --- Round-Robin Cycling ---
+    private void EnqueueAndSpawn(SpawnSystem system, params CreepType[] types)
+    {
+        for (int i = 0; i < types.Length; i++)
+        {
+            waveStore.EnqueueSpawn(types[i]);
+        }
+        system.Tick(0f);
+    }
+
+    // --- Wave-Driven Type Spawning ---
 
     [Test]
-    public void RoundRobin_FirstCreep_IsFirstType()
+    public void WaveSpawn_SmallType_CreatesSmallCreep()
     {
-        var system = MakeSpawnSystem(perSpawn: 1);
+        var system = MakeSpawnSystem();
 
-        system.Tick(SPAWN_INTERVAL);
+        EnqueueAndSpawn(system, CreepType.Small);
 
         Assert.AreEqual(1, creepStore.ActiveCreeps.Count);
         Assert.AreEqual(CreepType.Small, creepStore.ActiveCreeps[0].Type);
     }
 
     [Test]
-    public void RoundRobin_SecondCreep_IsSecondType()
+    public void WaveSpawn_BigType_CreatesBigCreep()
     {
-        var system = MakeSpawnSystem(perSpawn: 2);
+        var system = MakeSpawnSystem();
 
-        system.Tick(SPAWN_INTERVAL);
+        EnqueueAndSpawn(system, CreepType.Big);
 
-        Assert.AreEqual(2, creepStore.ActiveCreeps.Count);
-        Assert.AreEqual(CreepType.Small, creepStore.ActiveCreeps[0].Type);
-        Assert.AreEqual(CreepType.Big, creepStore.ActiveCreeps[1].Type);
+        Assert.AreEqual(1, creepStore.ActiveCreeps.Count);
+        Assert.AreEqual(CreepType.Big, creepStore.ActiveCreeps[0].Type);
     }
 
     [Test]
-    public void RoundRobin_CyclesAcrossBursts()
+    public void WaveSpawn_MixedTypes_CreatesCorrectTypesInOrder()
     {
-        // perSpawn=1, singleSpawnPoint → 1 creep per burst
-        // Burst 1: Small, Burst 2: Big, Burst 3: Small
-        var system = MakeSpawnSystem(perSpawn: 1);
+        var system = MakeSpawnSystem();
 
-        system.Tick(SPAWN_INTERVAL);
-        creepStore.BeginFrame();
-        system.Tick(SPAWN_INTERVAL);
-        creepStore.BeginFrame();
-        system.Tick(SPAWN_INTERVAL);
+        EnqueueAndSpawn(system, CreepType.Small, CreepType.Big, CreepType.Small);
 
         Assert.AreEqual(3, creepStore.ActiveCreeps.Count);
         Assert.AreEqual(CreepType.Small, creepStore.ActiveCreeps[0].Type);
@@ -92,28 +98,11 @@ public class CreepVarietyIntegrationTests
     }
 
     [Test]
-    public void Reset_ResetsTypeIndex_RestartsFromFirstType()
-    {
-        var system = MakeSpawnSystem(perSpawn: 1);
-
-        // Spawn one creep (Small), advance index to Big
-        system.Tick(SPAWN_INTERVAL);
-        Assert.AreEqual(CreepType.Small, creepStore.ActiveCreeps[0].Type);
-
-        // Reset and spawn again — should restart from Small
-        system.Reset();
-        creepStore.BeginFrame();
-        system.Tick(SPAWN_INTERVAL);
-
-        Assert.AreEqual(CreepType.Small, creepStore.ActiveCreeps[0].Type);
-    }
-
-    [Test]
     public void SpawnedCreeps_HaveCorrectTypeField()
     {
-        var system = MakeSpawnSystem(perSpawn: 2);
+        var system = MakeSpawnSystem();
 
-        system.Tick(SPAWN_INTERVAL);
+        EnqueueAndSpawn(system, CreepType.Small, CreepType.Big);
 
         var small = creepStore.ActiveCreeps[0];
         var big = creepStore.ActiveCreeps[1];
