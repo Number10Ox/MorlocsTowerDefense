@@ -62,3 +62,25 @@ Window > General > Test Runner > Edit Mode > Run All
 - [Technical Design Document](Docs/TDD.md)
 - [Architecture Diagrams](Docs/Architecture-Diagrams.md)
 - [Project Status](Docs/STATUS.md)
+
+## Development Process (brief)
+
+Built with AI-assisted pair programming (Claude Code): I set and maintained the project's architecture/quality constraints, reviewed and refined implementation plans up front, and spot-checked generated code in critical areas while relying on tests and manual verification to validate behavior and catch regressions. The living design spec in `Docs/TDD.md` (with `Docs/Architecture-Diagrams.md` and `Docs/STATUS.md`) guided each increment.
+
+Each story followed a loop: plan → implement with tests alongside production code → run the full Edit Mode suite → update docs. I also ran independent AI review passes (Copilot/ChatGPT) and only applied changes after verifying findings against the repo.
+
+## How to Review This Repo
+
+If you want the "tour" in the order the code actually executes:
+
+1. **Architecture + frame loop:** `Assets/Scripts/README.md` (folder purposes, per-frame tick order, single-writer table).
+2. **Design + invariants:** `Docs/TDD.md`, then `Docs/Architecture-Diagrams.md`.
+3. **Start at the composition root:** `Assets/Scripts/App/GameFlowController.cs`
+   From there, follow the wiring into:
+   - State machine + states (`Framework/StateMachine/`, `States/`)
+   - Session + stores (`GameSession`, `Stores/`)
+   - Gameplay systems (`Systems/`)
+   - Presentation (`Presentation/`)
+4. **Tests:** `Assets/Tests/Editor/` (Edit Mode). The suite is comprehensive (380+ tests as submitted), with both unit and integration coverage.
+
+Coding conventions and guardrails are captured in `.claude/CLAUDE.md`.
